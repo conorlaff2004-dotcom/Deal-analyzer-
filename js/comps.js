@@ -1,0 +1,198 @@
+/*
+ * Rent comparables: read rents out of text copied from listing sites
+ * (PropertyPal, Daft, Rightmove, SpareRoom, ...) and summarise the ones you
+ * keep. Pure functions only, so they can be tested in Node.
+ */
+(function (root) {
+  'use strict';
+
+  const PERIOD_MONTH = /^(pcm|per\s*(?:calendar\s*)?month|\/\s*(?:month|mth|mo)|a\s*month|p\/?m|pm|monthly|per\s*mth)$/i;
+  const PERIOD_WEEK = /^(pw|per\s*week|\/\s*(?:week|wk)|a\s*week|p\/?w|weekly)$/i;
+  const PRICE_RE = /([£€])\s?(\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?\s*(pcm|per\s*(?:calendar\s*)?month|\/\s*(?:month|mth|mo)\b|a\s*month|p\/?m\b|pm\b|monthly|per\s*mth|pw\b|per\s*week|\/\s*(?:week|wk)\b|a\s*week|p\/?w\b|weekly)?/gi;
+  const NOT_RENT = /(deposit|holding|fee|bond|asking price|offers? (?:over|around)|guide price|sale|sold|council tax|rates|per annum|p\.?a\.?|reduced from|was)\s*[:\-]?\s*$/i;
+
+  const ROOM_RE = /\b(double room|single room|en-?suite room|room to rent|room in|rooms? available|house ?share|flat ?share|sharing|lodger|digs)\b/i;
+  const BEDS_RE = /(\d+)\s*(?:-|\s)?(?:bed(?:room)?s?|br)\b/i;
+  const STUDIO_RE = /\b(studio|bedsit)\b/i;
+  const TYPE_RES = [
+    ['semi-detached', /\bsemi[-\s]?detached\b/i],
+    ['detached', /\bdetached\b/i],
+    ['terraced', /\b(?:end[-\s]of[-\s])?terrace(?:d)?\b|\btownhouse\b/i],
+    ['flat', /\b(apartment|flat|maisonette|duplex|penthouse)\b/i],
+  ];
+  const UK_PC = /\b(BT|[A-Z]{1,2})\d{1,2}[A-Z]?(?:\s*\d[A-Z]{2})?\b/;
+  const EIRCODE = /\b(?:[AC-FHKNPRTV-Y]\d{2}|D6W)(?:\s?[0-9AC-FHKNPRTV-Y]{4})?\b/;
+  const DATE_RE = /(?:added|listed|posted|reduced|available|let agreed)[^\d\n]{0,12}(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/i;
+
+  function toMonthly(amount, period) {
+    if (period && PERIOD_WEEK.test(period.trim())) return Math.round((amount * 52) / 12);
+    return amount;
+  }
+
+  /**
+   * Find rents in pasted text. Returns one entry per listing-looking price:
+   * { rent (per month), currency, beds, kind ('whole'|'room'), type, address, date, status }
+   */
+  function parseListings(text, opts) {
+    opts = opts || {};
+    const today = opts.today || new Date().toISOString().slice(0, 10);
+    text = String(text || '').replace(/ /g, ' ');
+    const matches = [];
+    let m;
+    PRICE_RE.lastIndex = 0;
+    while ((m = PRICE_RE.exec(text))) {
+      const before = text.slice(Math.max(0, m.index - 30), m.index);
+      const amount = Number(m[2].replace(/,/g, ''));
+      const rent = toMonthly(amount, m[3]);
+      if (NOT_RENT.test(before)) continue;
+      if (rent < 150 || rent > 15000) continue; // not a monthly residential rent
+      // "£950 pcm (£219 pw)": the second price restates the first
+      const prev = matches[matches.length - 1];
+      if (prev && m.index - prev.end < 40) continue;
+      matches.push({ start: m.index, end: m.index + m[0].length, rent, currency: m[1] === '€' ? 'EUR' : 'GBP' });
+    }
+
+    // Split the text between consecutive prices into "belongs to the price
+    // before" and "belongs to the price after": at the first blank line if
+    // there is one, otherwise halfway through the lines.
+    const cuts = [];
+    for (let i = 1; i < matches.length; i++) {
+      const a = matches[i - 1].end;
+      const gap = text.slice(a, matches[i].start);
+      const blank = gap.search(/\n[ \t]*\n/);
+      if (blank >= 0) cuts.push(a + blank + 1);
+      else {
+        const nl = [...gap.matchAll(/\n/g)].map((x) => x.index);
+        cuts.push(nl.length ? a + nl[Math.floor((nl.length - 1) / 2)] : a + Math.floor(gap.length / 2));
+      }
+    }
+
+    const out = [];
+    const seen = new Set();
+    matches.forEach((p, i) => {
+      const from = i > 0 ? cuts[i - 1] : Math.max(0, p.start - 400);
+      const to = i < matches.length - 1 ? cuts[i] : Math.min(text.length, p.end + 400);
+      const win = text.slice(from, to);
+
+      const kind = ROOM_RE.test(win) ? 'room' : 'whole';
+      let beds = null;
+      const b = win.match(BEDS_RE);
+      if (b) beds = Number(b[1]);
+      else if (STUDIO_RE.test(win)) beds = 0;
+      if (beds !== null && beds > 12) beds = null;
+      const type = (TYPE_RES.find(([, re]) => re.test(win)) || [''])[0];
+      const status = /let agreed/i.test(win) ? 'let agreed' : 'listed';
+
+      let date = today;
+      const d = win.match(DATE_RE);
+      if (d) {
+        let y = Number(d[3]);
+        if (y < 100) y += 2000;
+        const iso = `${y}-${String(d[2]).padStart(2, '0')}-${String(d[1]).padStart(2, '0')}`;
+        if (!Number.isNaN(new Date(iso).getTime())) date = iso;
+      }
+
+      const address = guessAddress(win);
+      const key = `${p.rent}|${beds}|${kind}|${address}`;
+      if (seen.has(key)) return; // same listing pasted twice / price repeated on a detail page
+      seen.add(key);
+      out.push({ rent: p.rent, currency: p.currency, beds, kind, type, address, date, status });
+    });
+    return out;
+  }
+
+  function guessAddress(win) {
+    const lines = win.split(/\n|\s{3,}|\|/).map((l) => l.trim()).filter(Boolean);
+    const clean = (l) => l.replace(/[£€]\s?[\d,]+.*$/, '').trim();
+    const looksLikeAddress = (l) =>
+      l.length >= 6 && l.length <= 110 && !/[£€]/.test(l) && /[a-z]/i.test(l) &&
+      (UK_PC.test(l) || EIRCODE.test(l) || /,/.test(l) || /\b(road|rd|street|st|avenue|ave|park|drive|gardens|close|lane|way|crescent|terrace|place|court|square|hill|grove|view|manor)\b/i.test(l)) &&
+      (UK_PC.test(l) || EIRCODE.test(l) || !/\b(bed|bath|reception|added|listed|deposit|available|epc|furnished)\b/i.test(l));
+    const hit = lines.find(looksLikeAddress);
+    return hit ? clean(hit).replace(/^\d+\s*bed(room)?s?\s+[a-z -]*?,\s*/i, '').slice(0, 100) : '';
+  }
+
+  // ---------------------------------------------------------------------------
+  // Summaries
+  // ---------------------------------------------------------------------------
+
+  function median(values) {
+    const s = values.slice().sort((a, b) => a - b);
+    if (!s.length) return NaN;
+    const mid = Math.floor(s.length / 2);
+    return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+  }
+
+  function withinMonths(dateIso, months, today) {
+    const d = new Date(dateIso);
+    const cutoff = new Date(today || Date.now());
+    cutoff.setMonth(cutoff.getMonth() - months);
+    return !Number.isNaN(d.getTime()) && d >= cutoff;
+  }
+
+  /**
+   * Summarise saved comparables for the subject property.
+   * Whole-property rents for the same bedroom count; rooms separately.
+   */
+  function summariseComps(comps, { beds, months = 12, today, currency } = {}) {
+    const recent = comps.filter((c) => withinMonths(c.date, months, today) && (!currency || !c.currency || c.currency === currency));
+    const whole = recent.filter((c) => c.kind !== 'room');
+    const sameBeds = whole.filter((c) => Number(c.beds) === Number(beds));
+    const rooms = recent.filter((c) => c.kind === 'room');
+    const stats = (list) => {
+      const v = list.map((c) => Number(c.rent)).filter((x) => x > 0);
+      return { count: v.length, median: median(v), min: Math.min(...v), max: Math.max(...v) };
+    };
+    return { recentCount: recent.length, sameBeds: stats(sameBeds), allWhole: stats(whole), rooms: stats(rooms) };
+  }
+
+  // ---------------------------------------------------------------------------
+  // CSV in / out
+  // ---------------------------------------------------------------------------
+
+  const CSV_COLS = ['date', 'address', 'beds', 'kind', 'type', 'rent', 'currency', 'status', 'source', 'link'];
+
+  function toCsv(comps) {
+    const esc = (v) => {
+      const s = v === null || v === undefined ? '' : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    return [CSV_COLS.join(','), ...comps.map((c) => CSV_COLS.map((k) => esc(c[k])).join(','))].join('\n');
+  }
+
+  function fromCsv(text) {
+    const rows = [];
+    let row = [];
+    let field = '';
+    let q = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (q) {
+        if (ch === '"' && text[i + 1] === '"') { field += '"'; i++; }
+        else if (ch === '"') q = false;
+        else field += ch;
+      } else if (ch === '"') q = true;
+      else if (ch === ',') { row.push(field); field = ''; }
+      else if (ch === '\n' || ch === '\r') {
+        if (ch === '\r' && text[i + 1] === '\n') i++;
+        row.push(field); rows.push(row); row = []; field = '';
+      } else field += ch;
+    }
+    if (field || row.length) { row.push(field); rows.push(row); }
+    const [head, ...body] = rows.filter((r) => r.some((x) => x.trim()));
+    if (!head) return [];
+    const idx = head.map((h) => h.trim().toLowerCase());
+    return body.map((r) => {
+      const o = {};
+      idx.forEach((k, j) => { if (CSV_COLS.includes(k)) o[k] = r[j]; });
+      o.rent = Number(o.rent);
+      o.beds = o.beds === '' || o.beds === undefined ? null : Number(o.beds);
+      o.kind = o.kind === 'room' ? 'room' : 'whole';
+      return o;
+    }).filter((o) => o.rent > 0);
+  }
+
+  const api = { parseListings, summariseComps, median, toCsv, fromCsv, withinMonths };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  else root.DealComps = api;
+})(typeof window !== 'undefined' ? window : globalThis);

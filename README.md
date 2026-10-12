@@ -1,34 +1,33 @@
 # Property Deal Analyzer
 
-A calculator for screening UK buy-to-let and BRRR deals. Enter a postcode and a purchase price and it works out:
+A calculator for screening buy-to-let and BRRR deals in Northern Ireland, Ireland and Great Britain. Enter a postcode and a purchase price and it works out:
 
-- **Purchase costs**: Stamp Duty (or Wales LTT / Scotland LBTT, with the investor surcharge), legal, survey, broker, lender and sourcing fees
+- **Purchase costs**: Stamp Duty (NI / England, with the investor surcharge), Irish stamp duty, Wales LTT, Scotland LBTT, plus legal, survey, broker, lender and sourcing fees. Ireland is shown in euro.
 - **Refurb**: budget from a cosmetic / medium / full level and floor area, contingency, holding costs and finance interest during the works
 - **Full-let rent**: monthly cashflow after management, maintenance, voids, insurance, service charge and mortgage
-- **Lodger rent**: income from letting spare rooms while you live there, how much of the mortgage it covers, and the Rent a Room £7,500 allowance
+- **Lodger rent**: income from letting spare rooms while you live there, how much of the mortgage it covers, and the Rent a Room allowance (£7,500 UK, €14,000 Ireland)
 - **Yield**: gross yield on purchase price, all-in cost and end value, plus net yield
 - **ROI**: annual cashflow ÷ money left in the deal
 - **Money left in after refinance**: new mortgage on the end value, minus the purchase loan and refinance costs, plus a lender ICR stress test
 
-## Area data
+## Rents
 
-**Analyse area** looks at what's around the postcode:
+Rent figures come from three places, best first:
 
-| What | Source | Key needed |
-|---|---|---|
-| Postcode, region, nearby postcodes | [postcodes.io](https://postcodes.io) | No |
-| Sold prices (by type: lower quartile, median, upper quartile, recent comparables) | [HM Land Registry Price Paid Data](https://landregistry.data.gov.uk/) | No |
-| Asking rents (whole property and double rooms) | [PropertyData API](https://propertydata.co.uk/api) | Yes, optional |
+1. **Your listings.** The *Rent evidence* panel has search links for PropertyPal, Daft, Rightmove, Zoopla, MyHome, Rent.ie and SpareRoom, filtered to the area and bedrooms. Copy a results page or a single listing and paste it in. The app picks out each rent (pcm or per week), bedrooms, property type, address, date and "let agreed", and you tick the ones to keep. Once you have **3 or more rents for the same bedroom count from the last 12 months**, the median becomes the full-let rent. Room listings set the lodger room rent the same way. Saved rents stay in your browser; use Export / Import CSV to back them up or move them between devices.
+2. **Official figures**, applied automatically by **Analyse area**:
+   - **Ireland**: the RTB Rent Index (rents agreed on new tenancies, CSO table RIA02) for the town or area, by bedrooms and property type, for the latest year. Enter an Eircode or town; the matching RTB area is filled in and you can change it.
+   - **Northern Ireland**: NI Housing Executive average rent (Jan–Jun 2025), Belfast £1,130 or rest of NI £850, adjusted for bedrooms and type.
+   - **Great Britain**: PropertyData live asking rents if you add an API key, otherwise regional averages scaled to local sold prices.
+3. **Rough guides** for room rents in NI and Ireland until you add room listings.
 
-From these it suggests:
+The app doesn't fetch listing sites itself. PropertyPal, Daft and Rightmove don't offer public APIs, their terms don't allow automated scraping, and they block it. The search link plus paste step takes a minute per area and keeps you within their terms.
 
-- **End value after refurb**: the upper quartile of local sales of the same property type
-- **Full-let rent** and **room rent**: live figures from PropertyData if you add a key; otherwise an estimate from regional averages (ONS / SpareRoom levels) adjusted by bedrooms, property type and how local sold prices compare with the regional median
-- **Your price vs median**: how far your purchase price sits below or above local sales of the same type
+## Sold prices
 
-Suggestions fill any field you haven't edited. Fields you've typed into are kept, and a **Use £…** link lets you switch to the area figure.
+In England and Wales, **Analyse area** pulls nearby sales from [HM Land Registry Price Paid Data](https://landregistry.data.gov.uk/) via [postcodes.io](https://postcodes.io). It shows quartiles by property type, recent comparables and how your price compares to the median, and suggests an end value (upper quartile of the same type). Land Registry doesn't record bedrooms.
 
-Land Registry covers England and Wales only and doesn't record bedrooms, so check listings for size. The rent estimate without a key is a starting point. Check it with local agents or Rightmove / SpareRoom before you offer.
+Northern Ireland doesn't publish individual sale prices. Ireland's Property Price Register isn't wired in yet. For both, set the end value from recent sales you find on PropertyPal or Daft.
 
 ## Running it
 
@@ -36,17 +35,18 @@ Land Registry covers England and Wales only and doesn't record bedrooms, so chec
 npm start        # http://localhost:8080
 ```
 
-`server.js` has no dependencies (Node 18+). It serves the app and proxies the three data APIs, so area lookups work even if a browser blocks the cross-site requests. You can also open `index.html` directly. The calculator works without a server, but some browsers may block the area lookups.
+`server.js` has no dependencies (Node 18+). It serves the app and proxies the data APIs (postcodes.io, Land Registry, CSO, PropertyData), so area lookups work even if a browser blocks the cross-site requests. You can also open `index.html` directly. The calculator works without a server, but some browsers may block the area lookups.
 
 ```bash
-npm test         # unit tests for the tax, mortgage and deal maths
+npm test         # unit tests for the tax, deal maths and listing parser
 ```
 
 ## Files
 
 - `index.html`, `styles.css`: the calculator
 - `js/calc.js`: the deal maths (pure functions, tested)
-- `js/data.js`: postcode, sold price and rent lookups and estimates
+- `js/data.js`: postcode, sold price, RTB and NI rent lookups and estimates
+- `js/comps.js`: reads rents from pasted listings and summarises them (tested)
 - `js/app.js`: wires the form to the maths and renders results
 - `server.js`: static server and API proxy
 

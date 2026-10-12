@@ -6,7 +6,7 @@ const path = require('path');
 
 const PORT = Number(process.env.PORT) || 8080;
 const ROOT = __dirname;
-const ALLOWED_HOSTS = new Set(['api.postcodes.io', 'landregistry.data.gov.uk', 'api.propertydata.co.uk']);
+const ALLOWED_HOSTS = new Set(['api.postcodes.io', 'landregistry.data.gov.uk', 'api.propertydata.co.uk', 'ws.cso.ie']);
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml' };
 
 async function proxy(req, res, target) {

@@ -163,7 +163,8 @@ LIMIT 1000`;
     'North East': { rent: 750, room: 500, price: 165000 },
     Wales: { rent: 850, room: 540, price: 210000 },
     Scotland: { rent: 1050, room: 650, price: 190000 },
-    'Northern Ireland': { rent: 900, room: 480, price: 185000 },
+    'Northern Ireland': { rent: 974, room: 450, price: 185000 },
+    Ireland: { rent: 1750, room: 800, price: 360000 },
   };
 
   // Regional average rent sits roughly at a 2-bed; scale by bedrooms.
@@ -195,7 +196,206 @@ LIMIT 1000`;
     };
   }
 
+  // ---------------------------------------------------------------------------
+  // Northern Ireland: NI Housing Executive private rent figures
+  // ---------------------------------------------------------------------------
+
+  // Average monthly rent, all property types, Jan–Jun 2025 (NIHE / Ulster
+  // University "Performance of the Private Rental Market in Northern Ireland").
+  // Room rents are a rough guide only: add listings to replace them.
+  const NI_RENTS = {
+    source: 'NIHE private rental report, Jan–Jun 2025',
+    Belfast: { rent: 1130, room: 520 },
+    other: { rent: 850, room: 430 },
+  };
+
+  function estimateNiRents({ district, beds, type }) {
+    const r = /belfast/i.test(district || '') ? NI_RENTS.Belfast : NI_RENTS.other;
+    // The all-property average sits around a 2–3 bed.
+    const b = BED_FACTOR[Math.min(6, Math.max(0, Math.round(beds)))] / 1.02;
+    return {
+      fullLet: Math.round((r.rent * b * (TYPE_FACTOR[type] || 1)) / 25) * 25,
+      room: Math.round(r.room / 10) * 10,
+      area: /belfast/i.test(district || '') ? 'Belfast' : 'NI outside Belfast',
+      source: NI_RENTS.source,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Ireland: RTB Rent Index (rents on new tenancies registered with the
+  // Residential Tenancies Board), published by the CSO as table RIA02.
+  // ---------------------------------------------------------------------------
+
+  const CSO_RIA02 = [
+    'https://ws.cso.ie/public/api.restful/PxStat.Data.Cube_API.ReadDataset/RIA02/JSON-stat/2.0/en',
+    'https://ws.cso.ie/public/api.restful/PxStat.Data.Cube_API.ReadDataset/RIA02/JSON-stat/1.0/en',
+  ];
+  let rtbCache = null;
+
+  // Parse JSON-stat 1.0 or 2.0 into dimensions plus a value accessor.
+  function parseJsonStat(json) {
+    const ds = json.dataset || json;
+    const dimObj = ds.dimension || {};
+    const ids = ds.id || dimObj.id;
+    const size = ds.size || dimObj.size;
+    if (!ids || !size) throw new Error('Unexpected CSO response');
+    const dims = ids.map((id) => {
+      const cat = dimObj[id].category || {};
+      const codes = Array.isArray(cat.index)
+        ? cat.index
+        : cat.index
+          ? Object.keys(cat.index).sort((a, b) => cat.index[a] - cat.index[b])
+          : Object.keys(cat.label || {});
+      return { id, label: dimObj[id].label || id, codes, labels: codes.map((c) => (cat.label && cat.label[c]) || c) };
+    });
+    const strides = [];
+    let acc = 1;
+    for (let k = size.length - 1; k >= 0; k--) { strides[k] = acc; acc *= size[k]; }
+    const values = ds.value;
+    const get = (positions) => {
+      let idx = 0;
+      positions.forEach((p, k) => { idx += p * strides[k]; });
+      const v = values[idx];
+      return v === null || v === undefined || v === '' ? null : Number(v);
+    };
+    return { dims, get };
+  }
+
+  function bedKey(label) {
+    const l = label.toLowerCase();
+    if (/all|total/.test(l)) return 'all';
+    if (/studio|bedsit/.test(l)) return 0;
+    if (/four|\b4/.test(l)) return 4;
+    if (/three|\b3/.test(l)) return 3;
+    if (/two|\b2/.test(l)) return 2;
+    if (/one|\b1/.test(l)) return 1;
+    return null;
+  }
+  function typeKey(label) {
+    const l = label.toLowerCase();
+    if (/all|total/.test(l)) return 'all';
+    if (/semi/.test(l)) return 'semi-detached';
+    if (/detached/.test(l)) return 'detached';
+    if (/terrace/.test(l)) return 'terraced';
+    if (/flat|apartment/.test(l)) return 'flat';
+    return 'other';
+  }
+
+  async function loadRtb() {
+    if (rtbCache) return rtbCache;
+    let json = null;
+    let lastErr = null;
+    for (const url of CSO_RIA02) {
+      try { json = await fetchJson(url); break; } catch (e) { lastErr = e; }
+    }
+    if (!json) throw lastErr || new Error('CSO rent data unavailable');
+    const { dims, get } = parseJsonStat(json);
+    const find = (re) => dims.findIndex((d) => re.test(d.label) || re.test(d.id));
+    const di = {
+      stat: find(/statistic/i),
+      time: find(/year|quarter|half|TLIST/i),
+      beds: find(/bed/i),
+      type: find(/property type/i),
+      loc: find(/location|area|county/i),
+    };
+    if (di.time < 0 || di.loc < 0) throw new Error('CSO table layout not recognised');
+
+    const pos = (overrides) => dims.map((d, k) => (k in overrides ? overrides[k] : 0));
+    const locAll = dims[di.loc].labels;
+    const bedsPos = (key) => (di.beds < 0 ? 0 : dims[di.beds].labels.findIndex((l) => bedKey(l) === key));
+    const typePos = (key) => (di.type < 0 ? 0 : dims[di.type].labels.findIndex((l) => typeKey(l) === key));
+    const allBeds = bedsPos('all');
+    const allTypes = typePos('all');
+
+    // Latest period with a national (or first location) figure.
+    const nat = Math.max(0, locAll.findIndex((l) => /ireland|state|national/i.test(l)));
+    let t = dims[di.time].codes.length - 1;
+    const base = {};
+    if (di.stat >= 0) base[di.stat] = 0;
+    if (di.beds >= 0) base[di.beds] = Math.max(0, allBeds);
+    if (di.type >= 0) base[di.type] = Math.max(0, allTypes);
+    while (t > 0 && get(pos({ ...base, [di.time]: t, [di.loc]: nat })) === null) t--;
+
+    function lookup(locLabel, beds, type) {
+      const l = locAll.indexOf(locLabel);
+      if (l < 0) return null;
+      const b = Math.min(4, Math.max(0, Math.round(beds)));
+      const tries = [
+        [bedsPos(b), typePos(type), 'this size and type'],
+        [bedsPos(b), allTypes, 'this size, all types'],
+        [allBeds, typePos(type), 'all sizes of this type', true],
+        [allBeds, allTypes, 'all sizes and types', true],
+      ];
+      for (const [bp, tp, basis, scale] of tries) {
+        if ((di.beds >= 0 && bp < 0) || (di.type >= 0 && tp < 0)) continue;
+        const o = { ...base, [di.time]: t, [di.loc]: l };
+        if (di.beds >= 0) o[di.beds] = bp;
+        if (di.type >= 0) o[di.type] = tp;
+        const v = get(pos(o));
+        if (v) {
+          const factor = scale ? BED_FACTOR[Math.min(6, Math.max(0, Math.round(beds)))] / 1.02 : beds > 4 ? BED_FACTOR[Math.min(6, beds)] / BED_FACTOR[4] : 1;
+          return { monthly: Math.round(v * factor), raw: v, basis };
+        }
+      }
+      return null;
+    }
+
+    rtbCache = { period: dims[di.time].labels[t], locations: locAll, lookup };
+    return rtbCache;
+  }
+
+  // Pick the RTB location that best matches what the user typed
+  // (town, area, county or a Dublin Eircode like D06).
+  function matchRtbLocation(input, locations) {
+    let q = String(input || '').toLowerCase();
+    const dub = q.match(/\bd(\d{2}|6w)\b/);
+    if (dub) q += ' dublin ' + (dub[1] === '6w' ? '6w' : String(Number(dub[1])));
+    const words = (s) => s.toLowerCase().replace(/co\.?\s/g, '').split(/[^a-z0-9]+/).filter(Boolean);
+    const qWords = new Set(words(q));
+    let best = null;
+    let bestScore = 0;
+    for (const loc of locations) {
+      const w = words(loc);
+      if (!w.length || /ireland|state|national/i.test(loc)) continue;
+      const hits = w.filter((x) => qWords.has(x)).length;
+      if (hits < w.length && !(hits && w[0] && qWords.has(w[0]))) continue;
+      const score = hits * 10 + (hits === w.length ? 5 : 0) - w.length;
+      if (score > bestScore) { bestScore = score; best = loc; }
+    }
+    return best;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Listing-site searches (opened in a new tab; the user copies results back)
+  // ---------------------------------------------------------------------------
+
+  function listingSearches({ area, beds, country }) {
+    const q = (site, words) => `https://www.google.com/search?q=${encodeURIComponent(`${words} site:${site}`)}`;
+    const bedWords = beds ? `${beds} bed` : '';
+    const ie = country === 'Ireland';
+    const list = ie
+      ? [
+          ['Daft.ie', q('daft.ie', `${bedWords} to rent ${area}`)],
+          ['PropertyPal', q('propertypal.com', `${bedWords} to rent ${area}`)],
+          ['MyHome.ie', q('myhome.ie', `${bedWords} to rent ${area}`)],
+          ['Rent.ie', q('rent.ie', `${bedWords} ${area}`)],
+          ['Rooms: Daft sharing', q('daft.ie/sharing', `room ${area}`)],
+        ]
+      : [
+          ['PropertyPal', q('propertypal.com', `${bedWords} property to rent ${area}`)],
+          ['Rightmove', q('rightmove.co.uk', `${bedWords} to rent ${area}`)],
+          ['Zoopla', q('zoopla.co.uk', `${bedWords} to rent ${area}`)],
+          ['Rooms: SpareRoom', q('spareroom.co.uk', `room to rent ${area}`)],
+        ];
+    return list.map(([label, url]) => ({ label, url }));
+  }
+
   const api = {
+    estimateNiRents,
+    loadRtb,
+    parseJsonStat,
+    matchRtbLocation,
+    listingSearches,
     normalisePostcode,
     lookupPostcode,
     nearbyPostcodes,

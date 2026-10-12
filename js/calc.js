@@ -22,7 +22,11 @@
   const LBTT_FTB = [[175000, 0], [250000, 0.02], [325000, 0.05], [750000, 0.10], [Infinity, 0.12]];
   const LBTT_ADS = 0.08;
 
+  const IE_STAMP = [[1000000, 0.01], [1500000, 0.02], [Infinity, 0.06]];
+
   const SURCHARGE_THRESHOLD = 40000;
+  // Tax-free allowance for renting a room in your own home.
+  const RENT_A_ROOM = { Ireland: 14000, default: 7500 };
 
   function bandedTax(price, bands, extraRate) {
     extraRate = extraRate || 0;
@@ -52,6 +56,10 @@
     if (country === 'Wales') {
       const r = bandedTax(price, surcharge ? LTT_HIGHER : LTT_MAIN);
       return { name: 'Land Transaction Tax (Wales)', ...r };
+    }
+    if (country === 'Ireland') {
+      // Residential stamp duty: 1% to €1m, 2% to €1.5m, 6% above.
+      return { name: 'Stamp Duty (Ireland)', ...bandedTax(price, IE_STAMP) };
     }
     if (country === 'Scotland') {
       const r = bandedTax(price, buyerType === 'ftb' ? LBTT_FTB : LBTT_MAIN);
@@ -217,8 +225,9 @@
       netYield: pct((lodgerIncome - lodgerOpex) * 12, allInCost),
       roi: cashLeftIn > 0 ? pct(lodgerCashflow * 12, cashLeftIn) : Infinity,
       mortgageCoverPct: ongoingMortgage > 0 ? (lodgerIncome / ongoingMortgage) * 100 : Infinity,
-      rentARoomTaxFree: Math.min(lodgerIncome * 12, 7500),
-      overRentARoom: lodgerIncome * 12 > 7500,
+      rentARoomLimit: RENT_A_ROOM[i.country] || RENT_A_ROOM.default,
+      rentARoomTaxFree: Math.min(lodgerIncome * 12, RENT_A_ROOM[i.country] || RENT_A_ROOM.default),
+      overRentARoom: lodgerIncome * 12 > (RENT_A_ROOM[i.country] || RENT_A_ROOM.default),
     };
 
     return {

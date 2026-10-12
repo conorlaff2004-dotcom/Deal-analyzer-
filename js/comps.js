@@ -22,7 +22,7 @@
   ];
   const UK_PC = /\b(BT|[A-Z]{1,2})\d{1,2}[A-Z]?(?:\s*\d[A-Z]{2})?\b/;
   const EIRCODE = /\b(?:[AC-FHKNPRTV-Y]\d{2}|D6W)(?:\s?[0-9AC-FHKNPRTV-Y]{4})?\b/;
-  const DATE_RE = /(?:added|listed|posted|reduced|available|let agreed)[^\d\n]{0,12}(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/i;
+  const DATE_RE = /(?:added|listed|posted|reduced|available|let agreed|sold(?: on)?|sale agreed|completed)[^\d\n]{0,12}(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/i;
 
   // ---------------------------------------------------------------------------
   // Areas: rents are grouped by postcode district (BT12, M14) or, in Ireland,
@@ -96,9 +96,36 @@
       matches.push({ start: m.index, end: m.index + m[0].length, rent, currency: m[1] === '€' ? 'EUR' : 'GBP' });
     }
 
-    // Split the text between consecutive prices into "belongs to the price
-    // before" and "belongs to the price after": at the first blank line if
-    // there is one, otherwise halfway through the lines.
+    const wins = splitWindows(text, matches);
+    const out = [];
+    const seen = new Set();
+    matches.forEach((p, i) => {
+      const win = wins[i];
+      const kind = ROOM_RE.test(win) ? 'room' : 'whole';
+      let beds = null;
+      const b = win.match(BEDS_RE);
+      if (b) beds = Number(b[1]);
+      else if (STUDIO_RE.test(win)) beds = 0;
+      if (beds !== null && beds > 12) beds = null;
+      const type = (TYPE_RES.find(([, re]) => re.test(win)) || [''])[0];
+      const status = /let agreed/i.test(win) ? 'let agreed' : 'listed';
+
+      const date = readDate(win, today);
+
+      const address = guessAddress(win);
+      const key = `${p.rent}|${beds}|${kind}|${address}`;
+      if (seen.has(key)) return; // same listing pasted twice / price repeated on a detail page
+      seen.add(key);
+      const district = extractDistrict(address) || extractDistrict(win);
+      out.push({ rent: p.rent, currency: p.currency, beds, kind, type, address, district, date, status });
+    });
+    return out;
+  }
+
+  // Split text into one window per price: the text between consecutive prices
+  // is divided at the first blank line if there is one, otherwise halfway
+  // through the lines.
+  function splitWindows(text, matches) {
     const cuts = [];
     for (let i = 1; i < matches.length; i++) {
       const a = matches[i - 1].end;
@@ -110,40 +137,125 @@
         cuts.push(nl.length ? a + nl[Math.floor((nl.length - 1) / 2)] : a + Math.floor(gap.length / 2));
       }
     }
+    return matches.map((p, i) => text.slice(
+      i > 0 ? cuts[i - 1] : Math.max(0, p.start - 400),
+      i < matches.length - 1 ? cuts[i] : Math.min(text.length, p.end + 400)));
+  }
 
+  const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  const NAMED_DATE = /\b(?:(\d{1,2})(?:st|nd|rd|th)?\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?,?\s+(\d{4})\b/i;
+  const PLAIN_DATE = /\b(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})\b/;
+
+  // A date in the window: one next to added/listed/sold etc. first, then any
+  // dd/mm/yyyy or "12 Mar 2025" / "March 2025".
+  function readDate(win, fallback) {
+    const iso = (y, m, d) => {
+      y = Number(y); if (y < 100) y += 2000;
+      const s = `${y}-${String(m).padStart(2, '0')}-${String(d || 1).padStart(2, '0')}`;
+      return Number.isNaN(new Date(s).getTime()) || Number(m) > 12 ? null : s;
+    };
+    let d = win.match(DATE_RE);
+    if (d) { const r = iso(d[3], d[2], d[1]); if (r) return r; }
+    d = win.match(NAMED_DATE);
+    if (d) { const r = iso(d[3], MONTHS.indexOf(d[2].toLowerCase().slice(0, 3)) + 1, d[1]); if (r) return r; }
+    d = win.match(PLAIN_DATE);
+    if (d) { const r = iso(d[3], d[2], d[1]); if (r) return r; }
+    return fallback;
+  }
+
+  function describe(win) {
+    let beds = null;
+    const b = win.match(BEDS_RE);
+    if (b) beds = Number(b[1]);
+    else if (STUDIO_RE.test(win)) beds = 0;
+    if (beds !== null && beds > 12) beds = null;
+    const type = (TYPE_RES.find(([, re]) => re.test(win)) || [''])[0];
+    const address = guessAddress(win);
+    const district = extractDistrict(address) || extractDistrict(win);
+    return { beds, type, address, district };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Sold prices: read sale prices out of text copied from sold listings
+  // (PropertyPal / PropertyNews sold, Daft, Property Price Register, Rightmove).
+  // ---------------------------------------------------------------------------
+
+  const SALE_RE = /([£€])\s?(\d{1,3}(?:,\d{3})+|\d{5,7})(?:\.\d{2})?(\s*(?:pcm|per\s*month|pw|per\s*week|p\/?m\b|\/\s*month|\/\s*week|monthly|weekly))?/gi;
+  const NOT_SALE = /(deposit|rent|stamp duty|fees?|saving|reduced by|budget)\s*[:\-]?\s*(?:of\s*)?$/i;
+
+  function parseSales(text, opts) {
+    opts = opts || {};
+    const today = opts.today || new Date().toISOString().slice(0, 10);
+    text = String(text || '').replace(/\u00a0/g, ' ');
+    const matches = [];
+    let m;
+    SALE_RE.lastIndex = 0;
+    while ((m = SALE_RE.exec(text))) {
+      if (m[3]) continue; // a rent
+      const price = Number(m[2].replace(/,/g, ''));
+      if (price < 15000 || price > 10000000) continue;
+      if (NOT_SALE.test(text.slice(Math.max(0, m.index - 30), m.index))) continue;
+      const prev = matches[matches.length - 1];
+      // "Sold £150,000 (asking £155,000)": keep the first price on the line
+      if (prev && m.index - prev.end < 60 && !/\n/.test(text.slice(prev.end, m.index))) continue;
+      matches.push({ start: m.index, end: m.index + m[0].length, price, currency: m[1] === '€' ? 'EUR' : 'GBP' });
+    }
+    const wins = splitWindows(text, matches);
     const out = [];
     const seen = new Set();
     matches.forEach((p, i) => {
-      const from = i > 0 ? cuts[i - 1] : Math.max(0, p.start - 400);
-      const to = i < matches.length - 1 ? cuts[i] : Math.min(text.length, p.end + 400);
-      const win = text.slice(from, to);
-
-      const kind = ROOM_RE.test(win) ? 'room' : 'whole';
-      let beds = null;
-      const b = win.match(BEDS_RE);
-      if (b) beds = Number(b[1]);
-      else if (STUDIO_RE.test(win)) beds = 0;
-      if (beds !== null && beds > 12) beds = null;
-      const type = (TYPE_RES.find(([, re]) => re.test(win)) || [''])[0];
-      const status = /let agreed/i.test(win) ? 'let agreed' : 'listed';
-
-      let date = today;
-      const d = win.match(DATE_RE);
-      if (d) {
-        let y = Number(d[3]);
-        if (y < 100) y += 2000;
-        const iso = `${y}-${String(d[2]).padStart(2, '0')}-${String(d[1]).padStart(2, '0')}`;
-        if (!Number.isNaN(new Date(iso).getTime())) date = iso;
-      }
-
-      const address = guessAddress(win);
-      const key = `${p.rent}|${beds}|${kind}|${address}`;
-      if (seen.has(key)) return; // same listing pasted twice / price repeated on a detail page
+      const win = wins[i];
+      const info = describe(win);
+      const status = /sale agreed|under offer|sstc|subject to contract/i.test(win) ? 'sale agreed'
+        : /\bsold\b/i.test(win) ? 'sold' : opts.defaultStatus || 'sold';
+      const key = `${p.price}|${info.address}`;
+      if (seen.has(key)) return;
       seen.add(key);
-      const district = extractDistrict(address) || extractDistrict(win);
-      out.push({ rent: p.rent, currency: p.currency, beds, kind, type, address, district, date, status });
+      out.push({ price: p.price, currency: p.currency, ...info, date: readDate(win, today), status });
     });
     return out;
+  }
+
+  /**
+   * Sold prices for the subject property, narrowest match first:
+   * same bedrooms and type, same bedrooms, same type, everything.
+   */
+  function summariseSales(sales, { beds, type, months = 24, today, currency, districts = null } = {}) {
+    const want = districts ? new Set(districts.map(normaliseDistrict)) : null;
+    const recent = sales.filter((c) =>
+      withinMonths(c.date, months, today) &&
+      (!currency || !c.currency || c.currency === currency) &&
+      (!want || want.has(normaliseDistrict(c.district))));
+    const sameBeds = (c) => Number(c.beds) === Number(beds);
+    const sameType = (c) => c.type === type;
+    return {
+      recentCount: recent.length,
+      bedsAndType: priceStats(recent.filter((c) => sameBeds(c) && sameType(c))),
+      sameBeds: priceStats(recent.filter(sameBeds)),
+      sameType: priceStats(recent.filter(sameType)),
+      all: priceStats(recent),
+    };
+  }
+
+  function summariseSalesByDistrict(sales, opts = {}) {
+    const names = Array.from(new Set(sales.map((c) => normaliseDistrict(c.district))));
+    return names
+      .map((d) => ({ district: d, ...summariseSales(sales, { ...opts, districts: [d] }) }))
+      .filter((r) => r.recentCount > 0)
+      .sort((a, b) => b.sameBeds.count - a.sameBeds.count || b.recentCount - a.recentCount || a.district.localeCompare(b.district, 'en', { numeric: true }));
+  }
+
+  function quantile(sorted, q) {
+    if (!sorted.length) return NaN;
+    const pos = (sorted.length - 1) * q;
+    const lo = Math.floor(pos);
+    const hi = Math.ceil(pos);
+    return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+  }
+
+  function priceStats(list) {
+    const v = list.map((c) => Number(c.price)).filter((x) => x > 0).sort((a, b) => a - b);
+    return { count: v.length, median: quantile(v, 0.5), lowerQuartile: quantile(v, 0.25), upperQuartile: quantile(v, 0.75), min: v[0], max: v[v.length - 1] };
   }
 
   function guessAddress(win) {
@@ -210,16 +322,17 @@
   // ---------------------------------------------------------------------------
 
   const CSV_COLS = ['date', 'address', 'district', 'beds', 'kind', 'type', 'rent', 'currency', 'status', 'source', 'link'];
+  const SALE_COLS = ['date', 'address', 'district', 'beds', 'type', 'price', 'currency', 'status', 'source', 'link'];
 
-  function toCsv(comps) {
+  function toCsv(comps, cols = CSV_COLS) {
     const esc = (v) => {
       const s = v === null || v === undefined ? '' : String(v);
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
-    return [CSV_COLS.join(','), ...comps.map((c) => CSV_COLS.map((k) => esc(c[k])).join(','))].join('\n');
+    return [cols.join(','), ...comps.map((c) => cols.map((k) => esc(c[k])).join(','))].join('\n');
   }
 
-  function fromCsv(text) {
+  function fromCsv(text, cols = CSV_COLS) {
     const rows = [];
     let row = [];
     let field = '';
@@ -243,16 +356,22 @@
     const idx = head.map((h) => h.trim().toLowerCase());
     return body.map((r) => {
       const o = {};
-      idx.forEach((k, j) => { if (CSV_COLS.includes(k)) o[k] = r[j]; });
+      idx.forEach((k, j) => { if (cols.includes(k)) o[k] = r[j]; });
+      if (cols === SALE_COLS) {
+        o.price = Number(o.price);
+        o.beds = o.beds === '' || o.beds === undefined ? null : Number(o.beds);
+        o.district = normaliseDistrict(o.district) || extractDistrict(o.address);
+        return o;
+      }
       o.rent = Number(o.rent);
       o.beds = o.beds === '' || o.beds === undefined ? null : Number(o.beds);
       o.kind = o.kind === 'room' ? 'room' : 'whole';
       o.district = normaliseDistrict(o.district) || extractDistrict(o.address);
       return o;
-    }).filter((o) => o.rent > 0);
+    }).filter((o) => (cols === SALE_COLS ? o.price : o.rent) > 0);
   }
 
-  const api = { parseListings, summariseComps, summariseByDistrict, extractDistrict, districtOf, normaliseDistrict, median, toCsv, fromCsv, withinMonths };
+  const api = { parseListings, parseSales, summariseSales, summariseSalesByDistrict, SALE_COLS, summariseComps, summariseByDistrict, extractDistrict, districtOf, normaliseDistrict, median, toCsv, fromCsv, withinMonths };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.DealComps = api;
 })(typeof window !== 'undefined' ? window : globalThis);

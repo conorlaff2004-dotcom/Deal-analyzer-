@@ -27,7 +27,19 @@ The app doesn't fetch listing sites itself. PropertyPal, Daft and Rightmove don'
 
 The rents panel shows recent property headlines (rents, landlords, house prices, housing policy) for Northern Ireland, Ireland and UK landlords. It opens on your country's tab, and stories that mention your area, such as Belfast or Naas, are tagged and shown first. Headlines come from Google News searches over the last 2 weeks. Online, the deploy workflow refreshes them every 3 hours (`scripts/news.js` writes `news.json`). Locally, `server.js` fetches them live, at most once an hour.
 
-## Sold prices
+## Sold evidence
+
+The *Sold evidence* panel works like the rents panel, for sale prices. Search links open sold results on PropertyPal, PropertyNews, Rightmove and Zoopla, or on the Property Price Register, Daft and MyHome for Ireland. Paste a sold results page, a single listing or rows from the Property Price Register. The app picks out the price, bedrooms, type, address, postcode district, sale date and whether it's sold or sale agreed, and you tick the ones to keep.
+
+Sales are grouped by postcode district, like rents. For the property you're analysing, the app looks at your sales from the last 2 years in that district and uses the narrowest group with 3 or more sales: same bedrooms and type, then same bedrooms, then same type. From that group it:
+
+- suggests the **end value after refurb** (upper quartile: a refurbished home should sell near the top of the local range)
+- shows how far your **purchase price** is above or below the median
+- fills a **Sold prices by area** table comparing districts
+
+You can tick *Include nearby districts* when your district has too few sales. Your own sold evidence takes priority over Land Registry figures. Export / Import CSV backs it up.
+
+## Sold prices (Land Registry)
 
 In England and Wales, **Analyse area** pulls nearby sales from [HM Land Registry Price Paid Data](https://landregistry.data.gov.uk/) via [postcodes.io](https://postcodes.io). It shows quartiles by property type, recent comparables and how your price compares to the median, and suggests an end value (upper quartile of the same type). Land Registry doesn't record bedrooms.
 

@@ -128,3 +128,48 @@ test('a short listing followed by a room listing stays two listings', () => {
   const r = parseListings('3 bed terrace\n5 Rugby Road, Belfast BT7\n£1,500 pcm\n\nDouble room\nCollege Park, BT7\n£120 pw', {});
   assert.deepEqual(r.map((x) => [x.rent, x.kind]), [[1500, 'whole'], [520, 'room']]);
 });
+
+test('reads sold prices, status, dates and areas', () => {
+  const { parseSales } = require('../js/comps.js');
+  const t = `3 Bed Terrace House
+12 Donegall Avenue, Belfast, BT12 6AB
+Sold £145,000
+Sold on 12/03/2026
+
+Sale agreed
+3 bed terrace
+4 Rockville Street, Belfast BT12
+Asking price £155,000
+
+15/02/2026 | 5 Main Street, Naas, Kildare | €350,000.00 | Second-Hand Dwelling house
+
+3 Bed Semi-detached House, 9 Ormeau Road, Belfast BT7 1AB
+£210,000  Sold Mar 2026
+Stamp duty £2,000
+To let £950 pcm`;
+  const r = parseSales(t, { today: '2026-10-01' });
+  assert.deepEqual(r.map((x) => [x.price, x.district, x.date, x.status]), [
+    [145000, 'BT12', '2026-03-12', 'sold'],
+    [155000, 'BT12', '2026-10-01', 'sale agreed'],
+    [350000, '', '2026-02-15', 'sold'],
+    [210000, 'BT7', '2026-03-01', 'sold'],
+  ]);
+  assert.equal(r[2].currency, 'EUR');
+});
+
+test('sold summaries by bedrooms, type and district', () => {
+  const { summariseSales, summariseSalesByDistrict, toCsv, fromCsv, SALE_COLS } = require('../js/comps.js');
+  const s = (district, beds, type, price) => ({ date: '2026-05-01', district, beds, type, price, currency: 'GBP' });
+  const sales = [s('BT12', 3, 'terraced', 140000), s('BT12', 3, 'terraced', 150000), s('BT12', 3, 'terraced', 160000), s('BT12', 2, 'terraced', 110000), s('BT7', 3, 'terraced', 230000)];
+  const o = { beds: 3, type: 'terraced', today: '2026-10-01', currency: 'GBP' };
+  const bt12 = summariseSales(sales, { ...o, districts: ['BT12'] });
+  assert.equal(bt12.bedsAndType.count, 3);
+  assert.equal(bt12.bedsAndType.median, 150000);
+  assert.equal(bt12.bedsAndType.upperQuartile, 155000);
+  assert.equal(bt12.all.count, 4);
+  assert.deepEqual(summariseSalesByDistrict(sales, o).map((r) => [r.district, r.sameBeds.median]), [['BT12', 150000], ['BT7', 230000]]);
+  const back = fromCsv(toCsv(sales, SALE_COLS), SALE_COLS);
+  assert.equal(back.length, 5);
+  assert.equal(back[4].price, 230000);
+  assert.equal(back[4].district, 'BT7');
+});

@@ -237,6 +237,34 @@
       </div>
     </section>
 
+    <!-- Sold evidence -->
+    <section class="panel" aria-labelledby="h-sold" id="soldPanel">
+      <h2 id="h-sold">Sold evidence from listings</h2>
+      <p class="note">Search for sold and sale-agreed homes in the area, copy what you find and paste it here. Each sale is saved against its postcode district. Once the district you’re buying in has 3 or more sales from the last 2 years, they set the end value and show how your price compares.</p>
+      <div class="links" id="soldLinks"></div>
+      <label class="f">Paste sold listings
+        <textarea id="soldPasteBox" rows="5" placeholder="Copy a sold results page, a single sold listing or rows from the Property Price Register and paste them here. Prices, bedrooms, type, address and sale dates are picked out for you to check."></textarea>
+      </label>
+      <div class="row wrap">
+        <button type="button" class="btn primary" id="soldParseBtn">Read prices</button>
+        <button type="button" class="btn ghost" id="soldAddManualBtn">Add one by hand</button>
+      </div>
+      <div id="soldPreview" class="preview-wrap" hidden></div>
+
+      <div class="comps-head">
+        <h3 id="soldTitle">Saved sales</h3>
+        <div class="row wrap">
+          <button type="button" class="link" id="soldExportCsv">Export CSV</button>
+          <label class="link file">Import CSV<input id="soldImportCsv" type="file" accept=".csv,text/csv"></label>
+          <button type="button" class="link" id="soldClear">Clear all</button>
+        </div>
+      </div>
+      <div id="soldSummary" class="comps-summary"></div>
+      <label class="f check"><input id="includeNearbySold" type="checkbox"> Include nearby districts when this area has fewer than 3 sales</label>
+      <div class="scroll" id="soldAreaWrap" hidden><table class="comps by-area" id="soldAreaTable"></table></div>
+      <div class="scroll"><table class="comps saved" id="soldTable"></table></div>
+    </section>
+
     <!-- Data settings -->
     <section class="panel quiet" aria-labelledby="h-settings">
       <h2 id="h-settings">Area data settings</h2>

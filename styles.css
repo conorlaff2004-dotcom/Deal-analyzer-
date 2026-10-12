@@ -264,3 +264,5 @@ textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .comps.by-area td { font-family: var(--f-num); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .comps.by-area tr.mine { background: rgba(79, 209, 197, 0.10); }
 .comps.by-area .tag { margin-left: 6px; font-family: var(--f-body); }
+.comps-summary b.pos { color: var(--good); }
+.comps-summary b.neg { color: var(--bad); }

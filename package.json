@@ -1,0 +1,11 @@
+{
+  "name": "deal-analyzer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "UK property deal analyzer: purchase costs, refurb, full-let and lodger rent, yield, ROI and money left in after refinance, with local sold prices by postcode.",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": { "node": ">=18" }
+}

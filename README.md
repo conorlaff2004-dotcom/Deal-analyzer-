@@ -4,6 +4,7 @@ A calculator for screening buy-to-let and BRRR deals in Northern Ireland, Irelan
 
 - **Purchase costs**: Stamp Duty (NI / England, with the investor surcharge), Irish stamp duty, Wales LTT, Scotland LBTT, plus legal, survey, broker, lender and sourcing fees. Ireland is shown in euro.
 - **Refurb**: budget from a cosmetic / medium / full level and floor area, contingency, holding costs and finance interest during the works
+- **Add bedrooms**: add one or more bedrooms in the refurb (convert a reception room, split a room, box/attic room, loft conversion, extension, or a custom cost). The cost and extra months go into the refurb. Rents, HMO and lodger room counts, and the suggested end value then use the bedroom count after works. A payoff box compares the value and rent uplift (from your sold and rent evidence) with the cost, and shows the payback time
 - **Income after refurb**: pick a strategy from the dropdown and the headline numbers follow it, with a table comparing all four:
   - **Full let**: one tenancy; rent less management and voids
   - **Lodgers**: you live in and let spare rooms; how much of the mortgage they cover and the Rent a Room allowance (£7,500 UK, €14,000 Ireland)

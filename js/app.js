@@ -21,6 +21,9 @@
   };
   const money = (v, cur) => (Number.isFinite(v) ? fmts[cur || currency()].format(Math.round(v)) : '–');
   const signed = (v) => (v > 0 ? '+' : '') + money(v);
+  // Bedrooms when you buy, and after any bedrooms added in the refurb.
+  const bedsNow = () => Number($('beds').value) || 0;
+  const bedsAfter = () => bedsNow() + Math.max(0, Math.round(Number($('extraBeds').value) || 0));
   const pct = (v, d = 1) => (v === Infinity ? '∞' : Number.isFinite(v) ? v.toFixed(d) + '%' : '–');
 
   // ---------------------------------------------------------------------------
@@ -124,6 +127,7 @@
     $('s-refurb').textContent = money(r.refurb.total + r.holding.total);
     rows($('tbl-refurb'), [
       ['Refurb budget', money(r.refurb.budget)],
+      r.refurb.bedroomWorks ? [`Adding ${r.refurb.extraBeds} bedroom${r.refurb.extraBeds > 1 ? 's' : ''}`, money(r.refurb.bedroomWorks)] : null,
       ['Contingency', money(r.refurb.contingency)],
       [`Holding costs (${r.refurb.months} mo)`, money(r.holding.property)],
       r.holding.finance ? ['Finance during works', money(r.holding.finance)] : null,
@@ -152,6 +156,7 @@
       ]);
     }
 
+    renderBedPayoff(r, i);
     renderIncome(r, i, key);
     renderCompare(r, key);
 
@@ -161,6 +166,77 @@
   function setTone(el, text, tone) {
     el.textContent = text;
     el.dataset.tone = tone;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Adding bedrooms: what an extra bedroom is worth against what it costs
+  // ---------------------------------------------------------------------------
+
+  const BED_METHODS = {
+    reception: { cost: 4000, months: 0 },
+    split: { cost: 3000, months: 0 },
+    boxroom: { cost: 2500, months: 0 },
+    loft: { cost: 40000, months: 2 },
+    extension: { cost: 50000, months: 3 },
+  };
+
+  function applyBedMethod() {
+    const m = BED_METHODS[$('extraBedMethod').value];
+    if (!m) return;
+    $('extraBedCost').value = m.cost;
+    $('extraBedMonths').value = m.months;
+  }
+
+  // Rent for a given bedroom count: your listings (2+), else the official figure.
+  function rentFor(beds) {
+    const scope = rentScope();
+    const s = Comps.summariseComps(comps, { beds, months: 12, currency: currency(), districts: scope.whole.districts });
+    if (s.sameBeds.count >= 2) return { value: s.sameBeds.median, from: 'your listings' };
+    const off = officialRents(beds);
+    return off && off.fullLet ? { value: off.fullLet, from: 'area estimate' } : null;
+  }
+
+  function renderBedPayoff(r, i) {
+    const box = $('bedPayoff');
+    const add = r.refurb.extraBeds;
+    box.hidden = !add;
+    if (!add) return;
+    const now = bedsNow();
+    const after = now + add;
+    const cost = r.refurb.bedroomWorks * (1 + (Number(i.refurbContingencyPct) || 0) / 100);
+    const lines = [];
+
+    const vNow = soldEvidence(now);
+    const vAfter = soldEvidence(after);
+    let valueUp = null;
+    if (vNow.stats && vAfter.stats && vNow.bedsSpecific && vAfter.bedsSpecific) {
+      valueUp = vAfter.stats.median - vNow.stats.median;
+      lines.push(['Value', `${after}-bed median ${money(vAfter.stats.median)} vs ${now}-bed ${money(vNow.stats.median)}`, signed(valueUp), valueUp > cost ? 'pos' : 'neg']);
+    } else {
+      lines.push(['Value', `Add 3+ sales of ${now}-bed and ${after}-bed homes under Sold evidence to see the value uplift`, '–', '']);
+    }
+
+    const rNow = rentFor(now);
+    const rAfter = rentFor(after);
+    let rentUp = null;
+    if (rNow && rAfter) {
+      rentUp = rAfter.value - rNow.value;
+      lines.push(['Full let', `${after}-bed ${money(rAfter.value)} vs ${now}-bed ${money(rNow.value)} (${rAfter.from})`, `${signed(rentUp)} pcm`, rentUp > 0 ? 'pos' : '']);
+    }
+    const roomRent = Number(i.hmoRoomRent) || Number(i.lodgerRoomRent) || 0;
+    if (roomRent) lines.push(['HMO / lodgers', `${add} more room${add > 1 ? 's' : ''} to let at ${money(roomRent)}`, `${signed(add * roomRent)} pcm`, 'pos']);
+
+    const best = Math.max(rentUp || 0, add * roomRent);
+    const payback = best > 0 ? cost / best : Infinity;
+    const verdict = valueUp !== null
+      ? (valueUp >= cost ? `Adds ${money(valueUp - cost)} more value than it costs` : `Costs ${money(cost - valueUp)} more than the value it adds`)
+      : best > 0 ? `Extra rent pays back the works in about ${Math.ceil(payback)} months` : '';
+
+    box.innerHTML =
+      `<div class="payoff-head"><b>${now} → ${after} bedrooms</b><span>Works ${money(cost)} incl. contingency${r.refurb.months ? `, ${r.refurb.months} months in total` : ''}</span></div>` +
+      '<table>' + lines.map(([k, d, v, cls]) => `<tr><th scope="row">${k}</th><td>${escapeHtml(d)}</td><td class="${cls}">${v}</td></tr>`).join('') + '</table>' +
+      (verdict ? `<p class="payoff-verdict" data-good="${valueUp !== null ? valueUp >= cost : best > 0}">${verdict}${valueUp !== null && best > 0 ? `; extra rent pays it back in about ${Math.ceil(payback)} months` : ''}.</p>` : '') +
+      '<p class="fine">A new bedroom needs a window big enough to escape through, enough floor space (6.5 m² for a single let room in an NI HMO) and building control sign-off. Losing the only living room can put off tenants and some lenders.</p>';
   }
 
   const STRATEGY_NAME = { full: 'Full let', lodger: 'Lodgers', hmo: 'HMO', sa: 'Serviced accommodation' };
@@ -370,7 +446,7 @@
   }
 
   async function fetchLiveRents(key) {
-    const beds = Number($('beds').value) || 0;
+    const beds = bedsAfter();
     try {
       const live = await Data.propertyDataRent(key, area.pc, beds);
       if (Number.isFinite(live.monthly)) area.liveRent = { ...live, beds };
@@ -390,9 +466,9 @@
   }
 
   // Official / estimated rents for the current property, before listings.
-  function officialRents() {
+  function officialRents(bedsFor) {
     if (!area) return null;
-    const beds = Number($('beds').value) || 0;
+    const beds = bedsFor ?? bedsAfter();
     const type = $('propertyType').value;
     const typeName = TYPE_LABEL[type].toLowerCase();
 
@@ -451,7 +527,7 @@
   // Pick the best rent figures and apply them to fields the user hasn't edited.
   // Your own listings (3+ in the last 12 months) beat official figures.
   function refreshEstimates() {
-    const beds = Number($('beds').value) || 0;
+    const beds = bedsAfter();
     const scope = rentScope();
     const s = Comps.summariseComps(comps, { beds, months: 12, currency: currency(), districts: scope.whole.districts });
     const sr = Comps.summariseComps(comps, { beds, months: 12, currency: currency(), districts: scope.rooms.districts });
@@ -479,14 +555,14 @@
       hint('roomHint', 'lodgerRoomRent', off.room, off.roomText);
       hint('hmoRoomHint', 'hmoRoomRent', off.room, off.roomText);
     }
-    if (area && !$('hmoRooms').dataset.touched) $('hmoRooms').value = Math.max(1, beds);
+    if (!$('hmoRooms').dataset.touched && (area || Number($('extraBeds').value))) $('hmoRooms').value = Math.max(1, beds);
 
     const ev = soldEvidence();
     if (ev.stats) {
       const gdv = Math.round(ev.stats.upperQuartile / 1000) * 1000;
       const where = ev.scope.label === 'all areas' ? '' : ` in ${ev.scope.label}`;
       hint('gdvHint', 'gdv', gdv,
-        `Your sold evidence: ${ev.stats.count} ${ev.what} sales${where} in the last 2 years, median ${money(ev.stats.median)}, upper quartile ${money(ev.stats.upperQuartile)} (a refurbished home should sell towards the top)`);
+        `${bedsAfter() !== bedsNow() ? `After adding ${bedsAfter() - bedsNow()} bedroom${bedsAfter() - bedsNow() > 1 ? 's' : ''}: ` : ''}Your sold evidence: ${ev.stats.count} ${ev.what} sales${where} in the last 2 years, median ${money(ev.stats.median)}, upper quartile ${money(ev.stats.upperQuartile)} (a refurbished home should sell towards the top)`);
     } else if (area && area.country !== 'Ireland' && area.country !== 'Northern Ireland') {
       const type = $('propertyType').value;
       const sameType = summarise(usableSales().filter((x) => x.type === type).map((x) => x.price));
@@ -501,7 +577,7 @@
       $('gdvHint').textContent = `Add 3 or more sales in ${subjectDistrict() || 'this area'} under Sold evidence to get a suggested end value.`;
     }
 
-    if (area && !$('lodgerRooms').dataset.touched) $('lodgerRooms').value = Math.max(0, beds - 1);
+    if (!$('lodgerRooms').dataset.touched && (area || Number($('extraBeds').value))) $('lodgerRooms').value = Math.max(0, beds - 1);
     renderComps();
     renderSold();
     render();
@@ -579,7 +655,7 @@
   function rentScope() {
     const d = subjectDistrict();
     if (!d) return { whole: { districts: null, label: 'all areas' }, rooms: { districts: null, label: 'all areas' } };
-    const beds = Number($('beds').value) || 0;
+    const beds = bedsAfter();
     const own = Comps.summariseComps(comps, { beds, months: 12, currency: currency(), districts: [d] });
     const nearby = (area && area.nearbyDistricts) || [];
     const widen = (short) => {
@@ -607,7 +683,7 @@
     $('saLinks').innerHTML = '<span class="links-label">Check nightly rates:</span>' +
       [['Airbnb', g('airbnb.co.uk', `${a} entire home`)], ['Booking.com', g('booking.com', `${a} apartment`)], ['AirDNA', `https://www.airdna.co/vacation-rental-data/app/search?query=${encodeURIComponent(a)}`]]
         .map(([l, u]) => `<a href="${u}" target="_blank" rel="noopener">${l}</a>`).join('');
-    const links = Data.listingSearches({ area: searchArea(), beds: Number($('beds').value) || 0, country: $('country').value });
+    const links = Data.listingSearches({ area: searchArea(), beds: bedsAfter(), country: $('country').value });
     $('searchLinks').innerHTML =
       '<span class="links-label">Search:</span>' +
       links.map((l) => `<a href="${l.url}" target="_blank" rel="noopener">${escapeHtml(l.label)}</a>`).join('');
@@ -627,14 +703,14 @@
     const cur = currency();
     preview = Comps.parseListings(text).map((c) => ({
       ...c, source, currency: c.currency || cur, district: c.district || subjectDistrict(),
-      beds: c.beds === null && c.kind !== 'room' ? Number($('beds').value) || null : c.beds,
+      beds: c.beds === null && c.kind !== 'room' ? bedsAfter() || null : c.beds,
       keep: c.currency === cur,
     }));
     renderPreview(preview.length ? '' : 'No rents found in that text. Copy the page again including the prices, or add one by hand.');
   }
 
   function addManual() {
-    preview.push({ rent: '', currency: currency(), district: subjectDistrict(), beds: Number($('beds').value) || null, kind: 'whole', type: $('propertyType').value, address: '', date: new Date().toISOString().slice(0, 10), status: 'listed', source: detectSource(''), keep: true });
+    preview.push({ rent: '', currency: currency(), district: subjectDistrict(), beds: bedsAfter() || null, kind: 'whole', type: $('propertyType').value, address: '', date: new Date().toISOString().slice(0, 10), status: 'listed', source: detectSource(''), keep: true });
     renderPreview('');
   }
 
@@ -682,7 +758,7 @@
   }
 
   function renderComps() {
-    const beds = Number($('beds').value) || 0;
+    const beds = bedsAfter();
     const cur = currency();
     const scope = rentScope();
     const here = subjectDistrict();
@@ -777,14 +853,14 @@
     try { localStorage.setItem(SOLD_KEY, JSON.stringify(sales)); } catch (e) { /* storage unavailable */ }
   }
 
-  function soldOpts(districts) {
-    return { beds: Number($('beds').value) || 0, type: $('propertyType').value, months: SOLD_MONTHS, currency: currency(), districts };
+  function soldOpts(districts, beds = bedsAfter()) {
+    return { beds, type: $('propertyType').value, months: SOLD_MONTHS, currency: currency(), districts };
   }
 
-  function soldScope() {
+  function soldScope(beds = bedsAfter()) {
     const d = subjectDistrict();
     if (!d) return { districts: null, label: 'all areas' };
-    const own = Comps.summariseSales(sales, soldOpts([d]));
+    const own = Comps.summariseSales(sales, soldOpts([d], beds));
     const nearby = (area && area.nearbyDistricts) || [];
     if ($('includeNearbySold').checked && nearby.length && own.sameBeds.count < MIN_COMPS) {
       const used = nearby.filter((n) => sales.some((c) => Comps.normaliseDistrict(c.district) === n));
@@ -794,21 +870,21 @@
   }
 
   // The narrowest group of your sales with at least 3 in it.
-  function soldEvidence() {
-    const scope = soldScope();
-    const s = Comps.summariseSales(sales, soldOpts(scope.districts));
-    const beds = Number($('beds').value) || 0;
+  // `beds` defaults to the bedrooms after works (for the end value).
+  function soldEvidence(beds = bedsAfter()) {
+    const scope = soldScope(beds);
+    const s = Comps.summariseSales(sales, soldOpts(scope.districts, beds));
     const typeName = TYPE_LABEL[$('propertyType').value].toLowerCase();
     const pick = [
       [s.bedsAndType, `${beds}-bed ${typeName}`],
       [s.sameBeds, `${beds}-bed`],
       [s.sameType, typeName],
     ].find(([st]) => st.count >= MIN_COMPS);
-    return pick ? { stats: pick[0], what: pick[1], scope } : { stats: null, scope, summary: s };
+    return pick ? { stats: pick[0], what: pick[1], scope, bedsSpecific: pick[0] !== s.sameType } : { stats: null, scope, summary: s };
   }
 
   function renderSoldLinks() {
-    const links = Data.soldSearches({ area: searchArea(), beds: Number($('beds').value) || 0, country: $('country').value });
+    const links = Data.soldSearches({ area: searchArea(), beds: bedsNow(), country: $('country').value });
     $('soldLinks').innerHTML = '<span class="links-label">Search:</span>' +
       links.map((l) => `<a href="${l.url}" target="_blank" rel="noopener">${escapeHtml(l.label)}</a>`).join('');
   }
@@ -831,7 +907,7 @@
   }
 
   function addSoldManual() {
-    soldPreview.push({ price: '', currency: currency(), district: subjectDistrict(), beds: Number($('beds').value) || null, type: $('propertyType').value, address: '', date: new Date().toISOString().slice(0, 10), status: 'sold', source: detectSoldSource(''), keep: true });
+    soldPreview.push({ price: '', currency: currency(), district: subjectDistrict(), beds: bedsNow() || null, type: $('propertyType').value, address: '', date: new Date().toISOString().slice(0, 10), status: 'sold', source: detectSoldSource(''), keep: true });
     renderSoldPreview('');
   }
 
@@ -879,26 +955,29 @@
   }
 
   function renderSold() {
-    const beds = Number($('beds').value) || 0;
+    const beds = bedsNow();
     const type = $('propertyType').value;
     const typeName = TYPE_LABEL[type].toLowerCase();
-    const scope = soldScope();
-    const s = Comps.summariseSales(sales, soldOpts(scope.districts));
+    const scope = soldScope(beds);
+    const s = Comps.summariseSales(sales, soldOpts(scope.districts, beds));
     const here = subjectDistrict();
     const price = Number($('price').value);
     $('soldTitle').textContent = `Saved sales (${sales.length})`;
-    const ev = soldEvidence();
+    const ev = soldEvidence(beds);
+    const after = bedsAfter();
+    const evAfter = after !== beds ? soldEvidence(after) : null;
     const vs = ev.stats && price ? ((price - ev.stats.median) / ev.stats.median) * 100 : NaN;
     $('soldSummary').innerHTML = sales.length
       ? [
           `<span>${beds}-bed ${typeName} median <b>${s.bedsAndType.count ? money(s.bedsAndType.median) : '–'}</b> (${s.bedsAndType.count})</span>`,
           `<span>${beds}-bed median <b>${s.sameBeds.count ? money(s.sameBeds.median) : '–'}</b> (${s.sameBeds.count})</span>`,
           `<span>All sales <b>${s.all.count ? money(s.all.median) : '–'}</b> (${s.all.count}, ${escapeHtml(scope.label)}, last 2 years)</span>`,
+          evAfter && evAfter.stats ? `<span>After works (${after}-bed): <b>${money(evAfter.stats.median)}</b> median (${evAfter.stats.count} ${escapeHtml(evAfter.what)})</span>` : '',
           Number.isFinite(vs) ? `<span>Your price is <b class="${vs <= 0 ? 'pos' : 'neg'}">${Math.abs(vs).toFixed(0)}% ${vs <= 0 ? 'below' : 'above'}</b> the ${escapeHtml(ev.what)} median</span>` : '',
         ].join('')
       : '<span class="muted">No sales saved yet. Use the search links, then paste what you find.</span>';
 
-    const rows = Comps.summariseSalesByDistrict(sales, soldOpts(null));
+    const rows = Comps.summariseSalesByDistrict(sales, soldOpts(null, beds));
     const nearby = new Set((area && area.nearbyDistricts) || []);
     $('soldAreaWrap').hidden = !rows.length;
     $('soldAreaTable').innerHTML = rows.length
@@ -1082,10 +1161,12 @@
     if (id === 'soldImportCsv') { if (e.target.files[0]) importSoldCsv(e.target.files[0]); e.target.value = ''; return; }
     if (id === 'importCsv') { if (e.target.files[0]) importCsv(e.target.files[0]); e.target.value = ''; return; }
     if (id === 'refurbLevel') applyRefurbLevel();
+    if (id === 'extraBedMethod') applyBedMethod();
+    if (id === 'extraBedCost' || id === 'extraBedMonths') $('extraBedMethod').value = 'custom';
     if (id === 'country') syncCountry();
     if (id === 'strategy') syncStrategy();
     syncFinanceVisibility();
-    if (['propertyType', 'beds', 'excludeNewBuild', 'rtbArea', 'country', 'includeNearby', 'includeNearbySold', 'postcode'].includes(id)) {
+    if (['propertyType', 'beds', 'excludeNewBuild', 'rtbArea', 'country', 'includeNearby', 'includeNearbySold', 'postcode', 'extraBeds'].includes(id)) {
       renderComps();
       renderSearchLinks();
       refreshEstimates();

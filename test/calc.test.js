@@ -131,3 +131,14 @@ test('HMO and serviced accommodation income', () => {
   assert.ok(Math.abs(s.costs.platform - s.income * 0.15) < 1e-9);
   assert.deepEqual(Object.keys(r.strategies), ['full', 'lodger', 'hmo', 'sa']);
 });
+
+test('adding bedrooms adds cost, contingency and time to the refurb', () => {
+  const r = analyseDeal({ ...base, extraBeds: 1, extraBedCost: 4000, extraBedMonths: 1 });
+  assert.equal(r.refurb.bedroomWorks, 4000);
+  assert.equal(r.refurb.budget, 20000);
+  assert.equal(r.refurb.contingency, 2400); // 10% of 24,000
+  assert.equal(r.refurb.months, 4);
+  const none = analyseDeal({ ...base, extraBeds: 0, extraBedCost: 4000, extraBedMonths: 1 });
+  assert.equal(none.refurb.months, 3);
+  assert.equal(r.totalCashIn - none.totalCashIn, 4000 + 400 + 100 + 375); // works, contingency, 1 month holding + interest
+});

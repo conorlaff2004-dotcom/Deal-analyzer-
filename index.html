@@ -49,7 +49,7 @@
             <option value="flat">Flat / maisonette</option>
           </select>
         </label>
-        <label class="f">Bedrooms
+        <label class="f">Bedrooms (now)
           <input id="beds" type="number" min="0" max="10" step="1" value="3">
         </label>
         <label class="f">Country (tax rules)
@@ -133,6 +133,26 @@
           <small>Council tax, utilities, insurance while empty</small>
         </label>
       </div>
+
+      <h3>Add bedrooms</h3>
+      <div class="grid">
+        <label class="f">Extra bedrooms
+          <input id="extraBeds" type="number" min="0" max="4" step="1" value="0">
+        </label>
+        <label class="f span2">How
+          <select id="extraBedMethod">
+            <option value="reception" selected>Convert a reception or dining room</option>
+            <option value="split">Split a large bedroom (stud wall)</option>
+            <option value="boxroom">Box room or attic room, no structural work</option>
+            <option value="loft">Loft conversion</option>
+            <option value="extension">Extension</option>
+            <option value="custom">Custom cost</option>
+          </select>
+        </label>
+        <label class="f"><span>Cost per bedroom (<span class="cur">£</span>)</span><input id="extraBedCost" type="number" step="500" value="4000"></label>
+        <label class="f">Extra months of works<input id="extraBedMonths" type="number" min="0" step="1" value="0"></label>
+      </div>
+      <div class="payoff" id="bedPayoff" hidden></div>
     </section>
 
     <!-- Refinance -->

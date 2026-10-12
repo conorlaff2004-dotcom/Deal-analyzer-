@@ -131,9 +131,12 @@
     const totalPurchaseCosts = Object.values(purchaseCosts).reduce((a, b) => a + b, 0);
 
     // --- Refurb --------------------------------------------------------------
-    const refurbBudget = n(i.refurbBudget);
+    // Extra bedrooms created during the works (conversion, loft, extension)
+    const extraBeds = Math.max(0, Math.round(n(i.extraBeds)));
+    const bedroomWorks = extraBeds * n(i.extraBedCost);
+    const refurbBudget = n(i.refurbBudget) + bedroomWorks;
     const contingency = refurbBudget * n(i.refurbContingencyPct) / 100;
-    const refurbMonths = n(i.refurbMonths);
+    const refurbMonths = n(i.refurbMonths) + (extraBeds ? n(i.extraBedMonths) : 0);
     const holdingProperty = n(i.holdingCostsMonthly) * refurbMonths;
     const holdingFinance = monthlyFinanceDuringWorks * refurbMonths;
     const refurbTotal = refurbBudget + contingency;
@@ -264,7 +267,7 @@
       deposit,
       purchaseCosts,
       totalPurchaseCosts,
-      refurb: { budget: refurbBudget, contingency, total: refurbTotal, months: refurbMonths },
+      refurb: { budget: refurbBudget - bedroomWorks, bedroomWorks, extraBeds, contingency, total: refurbTotal, months: refurbMonths },
       holding: { property: holdingProperty, finance: holdingFinance, total: holdingTotal },
       totalCashIn,
       allInCost,

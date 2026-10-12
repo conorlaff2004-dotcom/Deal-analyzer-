@@ -284,3 +284,17 @@ textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .breakdown table.compare th, .breakdown table.compare td { padding-inline: 8px; }
 .breakdown table.compare th:first-child, .breakdown table.compare td:first-child { padding-left: 16px; }
 .breakdown table.compare tfoot td { font-family: var(--f-body); padding: 6px 16px 4px; }
+
+/* Extra bedroom payoff */
+.payoff { display: grid; gap: 8px; background: var(--field); border: 1px solid var(--line); border-radius: 9px; padding: 12px 14px; }
+.payoff-head { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: baseline; }
+.payoff-head b { font: 600 1rem var(--f-display); }
+.payoff-head span { font-size: 0.8rem; color: var(--muted); }
+.payoff table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+.payoff th { text-align: left; font-weight: 600; color: var(--muted); padding: 5px 10px 5px 0; white-space: nowrap; vertical-align: top; }
+.payoff td { padding: 5px 0; vertical-align: top; }
+.payoff td:last-child { text-align: right; font-family: var(--f-num); white-space: nowrap; padding-left: 10px; }
+.payoff td.pos { color: var(--good); }
+.payoff td.neg { color: var(--bad); }
+.payoff-verdict { margin: 0; font-weight: 600; padding-left: 10px; border-left: 3px solid var(--warn); }
+.payoff-verdict[data-good="true"] { border-left-color: var(--good); }

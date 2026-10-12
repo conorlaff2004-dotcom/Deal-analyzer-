@@ -95,6 +95,13 @@
     setTone($('t-roi'), r.moneyOut && r.fullLet.cashflow > 0 ? '∞' : pct(r.fullLet.roi), r.fullLet.roi >= 10 ? 'good' : r.fullLet.roi >= 5 ? 'warn' : 'bad');
 
     renderVerdict(r);
+    $('m-cashflow').textContent = money(r.fullLet.cashflow);
+    $('m-cashflow').dataset.tone = $('t-cashflow').dataset.tone;
+    $('m-yield').textContent = pct(r.fullLet.grossYieldPrice);
+    $('m-yield').dataset.tone = $('t-yield').dataset.tone;
+    $('m-left').textContent = r.moneyOut ? 'All out' : money(r.cashLeftIn);
+    $('m-roi').textContent = $('t-roi').textContent;
+    $('m-roi').dataset.tone = $('t-roi').dataset.tone;
 
     $('s-purchase').textContent = money(r.price + r.totalPurchaseCosts);
     rows($('tbl-purchase'), [

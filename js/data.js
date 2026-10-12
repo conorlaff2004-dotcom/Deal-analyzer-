@@ -19,7 +19,15 @@
       return await res.json();
     } catch (err) {
       if (err.status || location.protocol === 'file:') throw err;
-      const res = await fetch('/proxy?url=' + encodeURIComponent(url), opts);
+      // Blocked by the browser (CORS) or offline. When served by server.js,
+      // retry through its proxy; elsewhere (e.g. GitHub Pages) there isn't one.
+      let res;
+      try {
+        res = await fetch('proxy?url=' + encodeURIComponent(url), opts);
+      } catch (e) {
+        res = null;
+      }
+      if (!res || res.status === 404 || res.status === 405) throw new Error(`couldn't reach ${new URL(url).host}`);
       if (!res.ok) throw httpError(res);
       return await res.json();
     }

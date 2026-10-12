@@ -29,7 +29,14 @@ In England and Wales, **Analyse area** pulls nearby sales from [HM Land Registry
 
 Northern Ireland doesn't publish individual sale prices. Ireland's Property Price Register isn't wired in yet. For both, set the end value from recent sales you find on PropertyPal or Daft.
 
-## Running it
+## Using it online
+
+The app deploys to GitHub Pages on every push (`.github/workflows/pages.yml`):
+https://conorlaff2004-dotcom.github.io/Deal-analyzer-/
+
+On a phone, open it and choose **Add to Home Screen** to use it like an app. Online there's no proxy server, so if a browser blocks one of the data services, that lookup shows an error and you can still enter the figure by hand.
+
+## Running it locally
 
 ```bash
 npm start        # http://localhost:8080

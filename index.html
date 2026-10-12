@@ -8,6 +8,11 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
   <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <meta name="theme-color" content="#1f6f5c">
+  <meta name="apple-mobile-web-app-capable" content="yes">
 </head>
 <body>
 <header class="top">
@@ -243,7 +248,7 @@
   </form>
 
   <!-- Results: the calculator display -->
-  <aside class="results" aria-label="Results">
+  <aside class="results" id="results" aria-label="Results">
     <div class="display">
       <div class="verdict" id="verdict"></div>
       <dl class="tiles">
@@ -292,6 +297,13 @@
   </div>
   <p class="fine">Sold prices: HM Land Registry Price Paid Data (England &amp; Wales), Crown copyright, Open Government Licence. Postcodes: postcodes.io / ONS. Land Registry does not record bedrooms, so compare against the property type and check listings for size.</p>
 </section>
+
+<a class="mini" href="#results" id="miniBar" aria-label="Jump to results">
+  <span><small>Cashflow</small><b id="m-cashflow">–</b></span>
+  <span><small>Yield</small><b id="m-yield">–</b></span>
+  <span><small>Left in</small><b id="m-left">–</b></span>
+  <span><small>ROI</small><b id="m-roi">–</b></span>
+</a>
 
 <footer class="foot">
   Figures are estimates to help screen deals, not financial advice. Check rents with local agents and values with comparable sales before you offer.

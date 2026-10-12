@@ -221,3 +221,23 @@ textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .panel > * { min-width: 0; }
 .panel { grid-template-columns: minmax(0, 1fr); } .inputs { grid-template-columns: minmax(0, 1fr); }
 .scroll { position: relative; }
+
+/* Phone: results sit below the form, so keep the key numbers pinned to the bottom. */
+.mini { display: none; }
+@media (max-width: 960px) {
+  .mini {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px;
+    padding: 8px 16px calc(8px + env(safe-area-inset-bottom, 0px));
+    background: var(--lcd); color: var(--lcd-ink); text-decoration: none;
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.18);
+  }
+  .mini span { display: grid; min-width: 0; }
+  .mini small { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--lcd-muted); }
+  .mini b { font: 600 0.95rem var(--f-num); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mini b[data-tone="good"] { color: var(--lcd-good); }
+  .mini b[data-tone="warn"] { color: var(--lcd-warn); }
+  .mini b[data-tone="bad"] { color: var(--lcd-bad); }
+  .foot { padding-bottom: 90px; }
+  .results { scroll-margin-top: 12px; }
+}

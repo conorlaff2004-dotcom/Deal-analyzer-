@@ -23,6 +23,10 @@ Rent figures come from three places, best first:
 
 The app doesn't fetch listing sites itself. PropertyPal, Daft and Rightmove don't offer public APIs, their terms don't allow automated scraping, and they block it. The search link plus paste step takes a minute per area and keeps you within their terms.
 
+## Property news
+
+The rents panel shows recent property headlines (rents, landlords, house prices, housing policy) for Northern Ireland, Ireland and UK landlords. It opens on your country's tab, and stories that mention your area, such as Belfast or Naas, are tagged and shown first. Headlines come from Google News searches over the last 2 weeks. Online, the deploy workflow refreshes them every 3 hours (`scripts/news.js` writes `news.json`). Locally, `server.js` fetches them live, at most once an hour.
+
 ## Sold prices
 
 In England and Wales, **Analyse area** pulls nearby sales from [HM Land Registry Price Paid Data](https://landregistry.data.gov.uk/) via [postcodes.io](https://postcodes.io). It shows quartiles by property type, recent comparables and how your price compares to the median, and suggests an end value (upper quartile of the same type). Land Registry doesn't record bedrooms.

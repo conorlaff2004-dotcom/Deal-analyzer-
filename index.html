@@ -217,6 +217,22 @@
       </div>
       <div id="compsSummary" class="comps-summary"></div>
       <div class="scroll"><table class="comps saved" id="compsTable"></table></div>
+
+      <div class="news" aria-labelledby="h-news">
+        <div class="comps-head">
+          <h3 id="h-news">Property news</h3>
+          <div class="tabs" role="tablist" id="newsTabs">
+            <button type="button" role="tab" data-feed="ni">NI</button>
+            <button type="button" role="tab" data-feed="ie">Ireland</button>
+            <button type="button" role="tab" data-feed="uk">UK landlords</button>
+          </div>
+        </div>
+        <ul class="news-list" id="newsList"><li class="muted">Loading headlines…</li></ul>
+        <div class="row wrap news-foot">
+          <button type="button" class="link" id="newsMore" hidden>Show more</button>
+          <span class="fine" id="newsMeta"></span>
+        </div>
+      </div>
     </section>
 
     <!-- Data settings -->

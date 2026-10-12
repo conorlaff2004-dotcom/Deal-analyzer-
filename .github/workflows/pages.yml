@@ -4,6 +4,8 @@ on:
   push:
     branches: [claude/property-deal-analyzer-qwgsra, main]
   workflow_dispatch:
+  schedule:
+    - cron: '17 */3 * * *' # refresh property news every 3 hours
 
 permissions:
   contents: read
@@ -30,6 +32,7 @@ jobs:
         run: |
           mkdir _site
           cp -r index.html styles.css icon.svg manifest.webmanifest js _site/
+          node scripts/news.js > _site/news.json
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

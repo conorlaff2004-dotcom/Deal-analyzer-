@@ -222,6 +222,7 @@
     form.querySelectorAll('[data-country]').forEach((el) => { el.hidden = el.dataset.country !== c; });
     renderSearchLinks();
     renderComps();
+    renderNews();
   }
 
   // ---------------------------------------------------------------------------
@@ -255,6 +256,7 @@
       btn.disabled = false;
       btn.textContent = 'Analyse area';
       renderSearchLinks();
+      renderNews();
     }
   }
 
@@ -637,6 +639,73 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Property news (news.json is refreshed every few hours by the Pages
+  // workflow, or fetched live by server.js)
+  // ---------------------------------------------------------------------------
+
+  let news = null;
+  let newsFeed = null;
+  let newsExpanded = false;
+
+  async function loadNews() {
+    try {
+      const res = await fetch('news.json', { cache: 'no-cache' });
+      if (!res.ok) throw new Error(res.status);
+      news = await res.json();
+    } catch (e) {
+      news = { error: true };
+    }
+    renderNews();
+  }
+
+  // A word that identifies the local area in a headline (e.g. Belfast, Naas).
+  function localWord() {
+    if ($('country').value === 'Ireland') return ($('rtbArea').value || $('postcode').value).split(',')[0].trim();
+    return (area && area.info && area.info.admin_district) || '';
+  }
+
+  function relDate(iso) {
+    const days = Math.floor((Date.now() - new Date(iso).getTime()) / 864e5);
+    if (!Number.isFinite(days)) return '';
+    if (days <= 0) return 'today';
+    if (days === 1) return 'yesterday';
+    if (days < 7) return `${days} days ago`;
+    return fmtDay(iso);
+  }
+
+  function renderNews() {
+    const defaultFeed = { Ireland: 'ie', 'Northern Ireland': 'ni' }[$('country').value] || 'uk';
+    const feed = newsFeed || defaultFeed;
+    document.querySelectorAll('#newsTabs [data-feed]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.feed === feed)));
+
+    const local = localWord();
+    const searchUrl = `https://news.google.com/search?q=${encodeURIComponent(`${local || ({ ie: 'Ireland', ni: 'Northern Ireland', uk: 'UK' })[feed]} property OR rent OR landlord`)}`;
+    const searchLink = `<a href="${searchUrl}" target="_blank" rel="noopener">More news${local ? ' for ' + escapeHtml(local) : ''} ↗</a>`;
+
+    const f = news && news.feeds && news.feeds[feed];
+    if (!news) return;
+    if (news.error || !f || !f.items.length) {
+      $('newsList').innerHTML = `<li class="muted">Headlines aren’t available right now${f && f.error ? ` (${escapeHtml(f.error)})` : ''}.</li>`;
+      $('newsMore').hidden = true;
+      $('newsMeta').innerHTML = searchLink;
+      return;
+    }
+
+    const re = local && local.length > 2 ? new RegExp(`\\b${local.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i') : null;
+    const items = f.items
+      .map((it) => ({ ...it, local: re ? re.test(it.title) : false }))
+      .sort((a, b) => (b.local - a.local) || String(b.date).localeCompare(String(a.date)));
+    const shown = newsExpanded ? items : items.slice(0, 6);
+    $('newsList').innerHTML = shown.map((it) => `<li>
+        <a href="${escapeHtml(it.link)}" target="_blank" rel="noopener">${escapeHtml(it.title)}</a>
+        <span>${it.local ? '<b class="tag local">' + escapeHtml(local) + '</b>' : ''}${escapeHtml(it.source || '')}${it.date ? ' · ' + relDate(it.date) : ''}</span>
+      </li>`).join('');
+    $('newsMore').hidden = items.length <= 6;
+    $('newsMore').textContent = newsExpanded ? 'Show fewer' : `Show all ${items.length}`;
+    $('newsMeta').innerHTML = `Headlines from the last 2 weeks via Google News, updated ${relDate(news.updated)}. ${searchLink}`;
+  }
+
+  // ---------------------------------------------------------------------------
   // Utilities
   // ---------------------------------------------------------------------------
 
@@ -720,6 +789,7 @@
       renderSearchLinks();
       refreshEstimates();
       renderArea();
+      renderNews();
     } else if (area && id === 'price') {
       renderArea();
     }
@@ -771,6 +841,15 @@
     if (e.target.id === 'cancelPreview') { preview = []; $('parsePreview').hidden = true; }
   });
 
+  $('newsTabs').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-feed]');
+    if (!b) return;
+    newsFeed = b.dataset.feed;
+    newsExpanded = false;
+    renderNews();
+  });
+  $('newsMore').addEventListener('click', () => { newsExpanded = !newsExpanded; renderNews(); });
+
   $('resetBtn').addEventListener('click', () => {
     try { localStorage.removeItem(STORE_KEY); } catch (e) { /* ignore */ }
     location.reload();
@@ -780,4 +859,5 @@
   syncFinanceVisibility();
   syncCountry();
   refreshEstimates();
+  loadNews();
 })();

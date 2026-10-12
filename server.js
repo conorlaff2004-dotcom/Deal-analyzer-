@@ -4,6 +4,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
+const { fetchNews } = require('./scripts/news.js');
+
 const PORT = Number(process.env.PORT) || 8080;
 const ROOT = __dirname;
 const ALLOWED_HOSTS = new Set(['api.postcodes.io', 'landregistry.data.gov.uk', 'api.propertydata.co.uk', 'ws.cso.ie']);
@@ -22,6 +24,14 @@ async function proxy(req, res, target) {
   }
 }
 
+// Headlines change slowly; refetch at most once an hour.
+let newsCache = null;
+async function news(res) {
+  if (!newsCache || Date.now() - newsCache.at > 3600e3) newsCache = { at: Date.now(), body: JSON.stringify(await fetchNews()) };
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(newsCache.body);
+}
+
 function send(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8' });
   res.end(body);
@@ -30,6 +40,7 @@ function send(res, status, body) {
 http.createServer((req, res) => {
   const u = new URL(req.url, 'http://localhost');
   if (u.pathname === '/proxy') return proxy(req, res, u.searchParams.get('url'));
+  if (u.pathname === '/news.json') return news(res).catch((e) => send(res, 502, e.message));
   const rel = u.pathname === '/' ? 'index.html' : decodeURIComponent(u.pathname).replace(/^\/+/, '');
   const file = path.resolve(ROOT, rel);
   if (!file.startsWith(ROOT + path.sep) || rel.includes('node_modules')) return send(res, 403, 'Forbidden');

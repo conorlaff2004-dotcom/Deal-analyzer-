@@ -499,7 +499,7 @@
 
   let comps = loadComps();
   let preview = [];
-  const SOURCES = ['PropertyPal', 'Daft', 'Rightmove', 'Zoopla', 'MyHome', 'Rent.ie', 'SpareRoom', 'Agent', 'Other'];
+  const SOURCES = ['PropertyPal', 'PropertyNews', 'Daft', 'Rightmove', 'Zoopla', 'MyHome', 'Rent.ie', 'SpareRoom', 'Agent', 'Other'];
 
   function loadComps() {
     try { return JSON.parse(localStorage.getItem(COMPS_KEY) || '[]'); } catch (e) { return []; }
@@ -523,7 +523,7 @@
 
   function detectSource(text) {
     const t = text.toLowerCase();
-    const map = [['propertypal', 'PropertyPal'], ['daft', 'Daft'], ['rightmove', 'Rightmove'], ['zoopla', 'Zoopla'], ['myhome', 'MyHome'], ['rent.ie', 'Rent.ie'], ['spareroom', 'SpareRoom']];
+    const map = [['propertypal', 'PropertyPal'], ['propertynews', 'PropertyNews'], ['daft', 'Daft'], ['rightmove', 'Rightmove'], ['zoopla', 'Zoopla'], ['myhome', 'MyHome'], ['rent.ie', 'Rent.ie'], ['spareroom', 'SpareRoom']];
     const hit = map.find(([k]) => t.includes(k));
     return hit ? hit[1] : $('country').value === 'Ireland' ? 'Daft' : 'PropertyPal';
   }

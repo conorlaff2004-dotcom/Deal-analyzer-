@@ -391,6 +391,7 @@ LIMIT 1000`;
         ]
       : [
           ['PropertyPal', q('propertypal.com', `${bedWords} property to rent ${area}`)],
+          ['PropertyNews', q('propertynews.com', `${bedWords} property to rent ${area}`)],
           ['Rightmove', q('rightmove.co.uk', `${bedWords} to rent ${area}`)],
           ['Zoopla', q('zoopla.co.uk', `${bedWords} to rent ${area}`)],
           ['Rooms: SpareRoom', q('spareroom.co.uk', `room to rent ${area}`)],

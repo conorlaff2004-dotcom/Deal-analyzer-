@@ -4,8 +4,12 @@ A calculator for screening buy-to-let and BRRR deals in Northern Ireland, Irelan
 
 - **Purchase costs**: Stamp Duty (NI / England, with the investor surcharge), Irish stamp duty, Wales LTT, Scotland LBTT, plus legal, survey, broker, lender and sourcing fees. Ireland is shown in euro.
 - **Refurb**: budget from a cosmetic / medium / full level and floor area, contingency, holding costs and finance interest during the works
-- **Full-let rent**: monthly cashflow after management, maintenance, voids, insurance, service charge and mortgage
-- **Lodger rent**: income from letting spare rooms while you live there, how much of the mortgage it covers, and the Rent a Room allowance (£7,500 UK, €14,000 Ireland)
+- **Income after refurb**: pick a strategy from the dropdown and the headline numbers follow it, with a table comparing all four:
+  - **Full let**: one tenancy; rent less management and voids
+  - **Lodgers**: you live in and let spare rooms; how much of the mortgage they cover and the Rent a Room allowance (£7,500 UK, €14,000 Ireland)
+  - **HMO**: rooms let separately with bills included; management, voids, bills, HMO licence and cleaning
+  - **Serviced accommodation**: nightly rate × occupancy; booking platform fees, cleaning per stay, bills, supplies and licence
+  - Maintenance, insurance, service charge and certificates apply to every strategy
 - **Yield**: gross yield on purchase price, all-in cost and end value, plus net yield
 - **ROI**: annual cashflow ÷ money left in the deal
 - **Money left in after refinance**: new mortgage on the end value, minus the purchase loan and refinance costs, plus a lender ICR stress test

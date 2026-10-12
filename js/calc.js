@@ -166,69 +166,96 @@
     const ongoingMortgage = monthlyPayment(ongoingLoan, ongoingRate, ongoingTerm, ongoingIO);
     const equity = gdv - ongoingLoan;
 
-    // --- Full let (single let / AST) -----------------------------------------
-    const rent = n(i.fullLetRent);
-    const letCosts = {
-      management: rent * n(i.managementPct) / 100,
-      maintenance: rent * n(i.maintenancePct) / 100,
-      voids: rent * n(i.voidsPct) / 100,
+    // --- Income strategies -------------------------------------------------
+    // Every strategy shares the property's fixed running costs; each adds
+    // its own income and costs.
+    const shared = {
       insurance: n(i.insuranceMonthly),
       serviceCharge: n(i.serviceChargeMonthly),
       other: n(i.otherMonthly),
     };
-    const letOpex = Object.values(letCosts).reduce((a, b) => a + b, 0);
-    const letCashflow = rent - letOpex - ongoingMortgage;
+    const maintPct = n(i.maintenancePct) / 100;
 
-    const fullLet = {
-      rent,
-      costs: letCosts,
-      opex: letOpex,
-      mortgage: ongoingMortgage,
-      cashflow: letCashflow,
-      annualCashflow: letCashflow * 12,
-      grossYieldPrice: pct(rent * 12, price),
-      grossYieldAllIn: pct(rent * 12, allInCost),
-      grossYieldGdv: pct(rent * 12, gdv),
-      netYield: pct((rent - letOpex) * 12, allInCost),
-      roi: cashLeftIn > 0 ? pct(letCashflow * 12, cashLeftIn) : Infinity,
-    };
+    function strategy(income, own) {
+      const costs = { ...own, maintenance: income * maintPct, ...shared };
+      const opex = Object.values(costs).reduce((a, b) => a + b, 0);
+      const cashflow = income - opex - ongoingMortgage;
+      return {
+        income,
+        costs,
+        opex,
+        mortgage: ongoingMortgage,
+        cashflow,
+        annualCashflow: cashflow * 12,
+        grossYieldPrice: pct(income * 12, price),
+        grossYieldAllIn: pct(income * 12, allInCost),
+        grossYieldGdv: pct(income * 12, gdv),
+        netYield: pct((income - opex) * 12, allInCost),
+        roi: cashLeftIn > 0 ? pct(cashflow * 12, cashLeftIn) : Infinity,
+      };
+    }
 
     // Lender rental stress test (ICR) on the ongoing loan.
     const stressRate = n(i.stressRate);
     const icrTarget = n(i.icrTarget);
     const stressInterest = ongoingLoan * stressRate / 100 / 12;
-    fullLet.icr = stressInterest > 0 ? (rent / stressInterest) * 100 : Infinity;
-    fullLet.icrPass = fullLet.icr >= icrTarget;
-    fullLet.maxLoanByRent = stressRate > 0 && icrTarget > 0 ? (rent * 12) / (icrTarget / 100) / (stressRate / 100) : Infinity;
+    function withIcr(st) {
+      st.icr = stressInterest > 0 ? (st.income / stressInterest) * 100 : Infinity;
+      st.icrPass = st.icr >= icrTarget;
+      st.maxLoanByRent = stressRate > 0 && icrTarget > 0 ? (st.income * 12) / (icrTarget / 100) / (stressRate / 100) : Infinity;
+      return st;
+    }
 
-    // --- Lodger (owner lives in, lets spare rooms) ---------------------------
+    // Full let (single let / AST)
+    const rent = n(i.fullLetRent);
+    const fullLet = withIcr(strategy(rent, {
+      management: rent * n(i.managementPct) / 100,
+      voids: rent * n(i.voidsPct) / 100,
+    }));
+    fullLet.rent = rent;
+
+    // Lodger: owner lives in and lets spare rooms
     const rooms = n(i.lodgerRooms);
     const lodgerIncome = rooms * n(i.lodgerRoomRent);
-    const lodgerCosts = {
+    const rentARoomLimit = RENT_A_ROOM[i.country] || RENT_A_ROOM.default;
+    const lodger = Object.assign(strategy(lodgerIncome, {
       bills: n(i.lodgerBillsMonthly),
-      maintenance: lodgerIncome * n(i.maintenancePct) / 100,
-      voids: lodgerIncome * n(i.voidsPct) / 100,
-      insurance: n(i.insuranceMonthly),
-    };
-    const lodgerOpex = Object.values(lodgerCosts).reduce((a, b) => a + b, 0);
-    const lodgerCashflow = lodgerIncome - lodgerOpex - ongoingMortgage;
-    const lodger = {
+      voids: lodgerIncome * n(i.lodgerVoidsPct ?? i.voidsPct) / 100,
+    }), {
       rooms,
-      income: lodgerIncome,
-      costs: lodgerCosts,
-      opex: lodgerOpex,
-      mortgage: ongoingMortgage,
-      cashflow: lodgerCashflow,
-      annualCashflow: lodgerCashflow * 12,
-      grossYieldPrice: pct(lodgerIncome * 12, price),
-      grossYieldAllIn: pct(lodgerIncome * 12, allInCost),
-      netYield: pct((lodgerIncome - lodgerOpex) * 12, allInCost),
-      roi: cashLeftIn > 0 ? pct(lodgerCashflow * 12, cashLeftIn) : Infinity,
       mortgageCoverPct: ongoingMortgage > 0 ? (lodgerIncome / ongoingMortgage) * 100 : Infinity,
-      rentARoomLimit: RENT_A_ROOM[i.country] || RENT_A_ROOM.default,
-      rentARoomTaxFree: Math.min(lodgerIncome * 12, RENT_A_ROOM[i.country] || RENT_A_ROOM.default),
-      overRentARoom: lodgerIncome * 12 > (RENT_A_ROOM[i.country] || RENT_A_ROOM.default),
-    };
+      rentARoomLimit,
+      rentARoomTaxFree: Math.min(lodgerIncome * 12, rentARoomLimit),
+      overRentARoom: lodgerIncome * 12 > rentARoomLimit,
+    });
+
+    // HMO: every room let separately, bills included
+    const hmoRooms = n(i.hmoRooms);
+    const hmoIncome = hmoRooms * n(i.hmoRoomRent);
+    const hmo = withIcr(strategy(hmoIncome, {
+      management: hmoIncome * n(i.hmoManagementPct) / 100,
+      voids: hmoIncome * n(i.hmoVoidsPct) / 100,
+      bills: n(i.hmoBillsMonthly),
+      licence: n(i.hmoLicenceYearly) / 12,
+      cleaning: n(i.hmoCleaningMonthly),
+    }));
+    hmo.rooms = hmoRooms;
+
+    // Serviced accommodation: nightly lets
+    const nights = (365 / 12) * Math.min(100, n(i.saOccupancyPct)) / 100;
+    const saIncome = nights * n(i.saNightlyRate);
+    const stays = n(i.saAvgStay) > 0 ? nights / n(i.saAvgStay) : 0;
+    const sa = strategy(saIncome, {
+      platform: saIncome * n(i.saPlatformPct) / 100,
+      management: saIncome * n(i.saManagementPct) / 100,
+      cleaning: stays * n(i.saCleaningPerStay),
+      bills: n(i.saBillsMonthly),
+      supplies: n(i.saSuppliesMonthly),
+      licence: n(i.saLicenceYearly) / 12,
+    });
+    Object.assign(sa, { nights, stays });
+
+    const strategies = { full: fullLet, lodger, hmo, sa };
 
     return {
       price,
@@ -252,6 +279,9 @@
       equity,
       fullLet,
       lodger,
+      hmo,
+      sa,
+      strategies,
     };
   }
 

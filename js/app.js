@@ -89,15 +89,19 @@
       : r.refinance.enabled
         ? `${pct(r.cashLeftInPct, 0)} of ${money(r.totalCashIn)} invested`
         : 'no refinance';
-    setTone($('t-cashflow'), money(r.fullLet.cashflow), r.fullLet.cashflow >= 200 ? 'good' : r.fullLet.cashflow >= 0 ? 'warn' : 'bad');
-    setTone($('t-yield'), pct(r.fullLet.grossYieldPrice), r.fullLet.grossYieldPrice >= 7 ? 'good' : r.fullLet.grossYieldPrice >= 5.5 ? 'warn' : 'bad');
-    $('t-yieldSub').textContent = `${pct(r.fullLet.netYield)} net on all-in cost`;
-    setTone($('t-roi'), r.moneyOut && r.fullLet.cashflow > 0 ? '∞' : pct(r.fullLet.roi), r.fullLet.roi >= 10 ? 'good' : r.fullLet.roi >= 5 ? 'warn' : 'bad');
+    const key = i.strategy || 'full';
+    const st = r.strategies[key];
+    const tone = (v, good, ok) => (v >= good ? 'good' : v >= ok ? 'warn' : 'bad');
+    $('t-cashflowLabel').textContent = `${STRATEGY_SHORT[key]} cashflow`;
+    setTone($('t-cashflow'), money(st.cashflow), tone(st.cashflow, 200, 0));
+    setTone($('t-yield'), pct(st.grossYieldPrice), tone(st.grossYieldPrice, 7, 5.5));
+    $('t-yieldSub').textContent = `${pct(st.netYield)} net on all-in cost`;
+    setTone($('t-roi'), r.moneyOut && st.cashflow > 0 ? '∞' : pct(st.roi), tone(st.roi, 10, 5));
 
-    renderVerdict(r);
-    $('m-cashflow').textContent = money(r.fullLet.cashflow);
+    renderVerdict(r, st, key);
+    $('m-cashflow').textContent = money(st.cashflow);
     $('m-cashflow').dataset.tone = $('t-cashflow').dataset.tone;
-    $('m-yield').textContent = pct(r.fullLet.grossYieldPrice);
+    $('m-yield').textContent = pct(st.grossYieldPrice);
     $('m-yield').dataset.tone = $('t-yield').dataset.tone;
     $('m-left').textContent = r.moneyOut ? 'All out' : money(r.cashLeftIn);
     $('m-roi').textContent = $('t-roi').textContent;
@@ -148,45 +152,8 @@
       ]);
     }
 
-    const fl = r.fullLet;
-    $('s-let').textContent = money(fl.cashflow) + ' pcm';
-    rows($('tbl-let'), [
-      ['Rent', money(fl.rent)],
-      ['Management', '−' + money(fl.costs.management)],
-      ['Maintenance', '−' + money(fl.costs.maintenance)],
-      ['Voids', '−' + money(fl.costs.voids)],
-      ['Insurance', '−' + money(fl.costs.insurance)],
-      fl.costs.serviceCharge ? ['Service charge / ground rent', '−' + money(fl.costs.serviceCharge)] : null,
-      ['Certificates & other', '−' + money(fl.costs.other)],
-      ['Mortgage', '−' + money(fl.mortgage)],
-      ['Cashflow', money(fl.cashflow), 'total ' + (fl.cashflow >= 0 ? 'pos' : 'neg')],
-      ['Annual cashflow', money(fl.annualCashflow)],
-      ['Gross yield on price / all-in', `${pct(fl.grossYieldPrice)} / ${pct(fl.grossYieldAllIn)}`],
-      ['Gross yield on end value', pct(fl.grossYieldGdv)],
-      ['Net yield (before mortgage)', pct(fl.netYield)],
-      ['ROI on money left in', r.moneyOut && fl.cashflow > 0 ? '∞ (all money out)' : pct(fl.roi)],
-      r.ongoingLoan
-        ? [`Lender ICR at ${i.stressRate}%`, `${pct(fl.icr, 0)} ${fl.icrPass ? '✓ passes' : '✗ below ' + i.icrTarget + '%'}`, fl.icrPass ? 'pos' : 'neg']
-        : null,
-      r.ongoingLoan && !fl.icrPass ? ['Max loan this rent supports', money(fl.maxLoanByRent), 'neg'] : null,
-    ]);
-
-    const lo = r.lodger;
-    $('s-lodger').textContent = money(lo.cashflow) + ' pcm';
-    rows($('tbl-lodger'), [
-      [`Room income (${lo.rooms} × ${money(i.lodgerRoomRent)})`, money(lo.income)],
-      ['Extra bills', '−' + money(lo.costs.bills)],
-      ['Maintenance & voids', '−' + money(lo.costs.maintenance + lo.costs.voids)],
-      ['Insurance', '−' + money(lo.costs.insurance)],
-      ['Mortgage', '−' + money(lo.mortgage)],
-      ['Net after mortgage', money(lo.cashflow), 'total ' + (lo.cashflow >= 0 ? 'pos' : 'neg')],
-      ['Mortgage covered by lodgers', pct(lo.mortgageCoverPct, 0)],
-      ['Gross yield on price', pct(lo.grossYieldPrice)],
-      ['ROI on money left in', r.moneyOut && lo.cashflow > 0 ? '∞ (all money out)' : pct(lo.roi)],
-      lo.overRentARoom
-        ? [`Taxable above Rent a Room ${money(lo.rentARoomLimit)}`, money(lo.income * 12 - lo.rentARoomLimit) + ' / yr']
-        : ['Rent a Room relief', `all tax-free (under ${money(lo.rentARoomLimit)})`],
-    ]);
+    renderIncome(r, i, key);
+    renderCompare(r, key);
 
     save();
   }
@@ -196,19 +163,92 @@
     el.dataset.tone = tone;
   }
 
-  function renderVerdict(r) {
+  const STRATEGY_NAME = { full: 'Full let', lodger: 'Lodgers', hmo: 'HMO', sa: 'Serviced accommodation' };
+  const STRATEGY_SHORT_ROW = { full: 'Full let', lodger: 'Lodgers', hmo: 'HMO', sa: 'Serviced acc.' };
+  const STRATEGY_SHORT = { full: 'Full-let', lodger: 'Lodger', hmo: 'HMO', sa: 'SA' };
+
+  function renderVerdict(r, st, key) {
+    const hasIcr = key === 'full' || key === 'hmo';
     const checks = [
-      { ok: r.fullLet.grossYieldPrice >= 7, label: `Yield ${pct(r.fullLet.grossYieldPrice)}` },
-      { ok: r.fullLet.cashflow >= 200, label: `Cashflow ${money(r.fullLet.cashflow)}` },
+      { ok: st.grossYieldPrice >= 7, label: `Yield ${pct(st.grossYieldPrice)}` },
+      { ok: st.cashflow >= 200, label: `Cashflow ${money(st.cashflow)}` },
       { ok: !r.refinance.enabled || r.cashLeftInPct <= 25, label: r.moneyOut ? 'All money out' : `${pct(r.cashLeftInPct, 0)} left in` },
-      { ok: !r.ongoingLoan || r.fullLet.icrPass, label: `ICR ${pct(r.fullLet.icr, 0)}` },
-    ];
+      hasIcr ? { ok: !r.ongoingLoan || st.icrPass, label: `ICR ${pct(st.icr, 0)}` } : null,
+    ].filter(Boolean);
     const score = checks.filter((c) => c.ok).length;
-    const word = score === 4 ? 'Strong deal' : score >= 2 ? 'Worth a closer look' : 'Weak on these numbers';
-    const tone = score === 4 ? 'good' : score >= 2 ? 'warn' : 'bad';
+    const word = score === checks.length ? 'Strong deal' : score >= 2 ? 'Worth a closer look' : 'Weak on these numbers';
+    const tone = score === checks.length ? 'good' : score >= 2 ? 'warn' : 'bad';
     $('verdict').innerHTML =
       `<span class="pill" data-tone="${tone}">${word}</span>` +
       checks.map((c) => `<span class="chip" data-ok="${c.ok}">${c.ok ? '✓' : '✗'} ${c.label}</span>`).join('');
+  }
+
+  const COST_LABEL = {
+    management: 'Management', voids: 'Voids', bills: 'Bills', licence: 'Licence', cleaning: 'Cleaning',
+    platform: 'Booking platform fees', supplies: 'Supplies', maintenance: 'Maintenance',
+    insurance: 'Insurance', serviceCharge: 'Service charge / ground rent', other: 'Certificates & other',
+  };
+
+  function renderIncome(r, i, key) {
+    const st = r.strategies[key];
+    $('s-incomeLabel').textContent = `${STRATEGY_NAME[key]}, monthly`;
+    $('s-income').textContent = money(st.cashflow) + ' pcm';
+    const incomeLabel = {
+      full: () => 'Rent',
+      lodger: () => `Room income (${st.rooms} × ${money(i.lodgerRoomRent)})`,
+      hmo: () => `Room income (${st.rooms} × ${money(i.hmoRoomRent)})`,
+      sa: () => `${st.nights.toFixed(1)} nights × ${money(i.saNightlyRate)} (${st.stays.toFixed(1)} stays)`,
+    }[key]();
+    const incomeRow = [incomeLabel, money(st.income)];
+    const costRows = Object.entries(st.costs)
+      .filter(([k, v]) => v || ['management', 'maintenance', 'insurance'].includes(k))
+      .map(([k, v]) => [k === 'bills' && key === 'lodger' ? 'Extra bills' : COST_LABEL[k] || k, '−' + money(v)]);
+    const extra = [];
+    if (key === 'full' || key === 'hmo') {
+      if (r.ongoingLoan) extra.push([`Lender ICR at ${i.stressRate}%`, `${pct(st.icr, 0)} ${st.icrPass ? '✓ passes' : '✗ below ' + i.icrTarget + '%'}`, st.icrPass ? 'pos' : 'neg']);
+      if (r.ongoingLoan && !st.icrPass) extra.push(['Max loan this income supports', money(st.maxLoanByRent), 'neg']);
+      if (key === 'hmo') extra.push(['', '<small class="muted">HMO and SA lending usually needs a specialist lender</small>']);
+    }
+    if (key === 'lodger') {
+      extra.push(['Mortgage covered by lodgers', pct(st.mortgageCoverPct, 0)]);
+      extra.push(st.overRentARoom
+        ? [`Taxable above Rent a Room ${money(st.rentARoomLimit)}`, money(st.income * 12 - st.rentARoomLimit) + ' / yr']
+        : ['Rent a Room relief', `all tax-free (under ${money(st.rentARoomLimit)})`]);
+    }
+    rows($('tbl-income'), [
+      incomeRow,
+      ...costRows,
+      ['Mortgage', '−' + money(st.mortgage)],
+      ['Cashflow', money(st.cashflow), 'total ' + (st.cashflow >= 0 ? 'pos' : 'neg')],
+      ['Annual cashflow', money(st.annualCashflow)],
+      ['Gross yield on price / all-in', `${pct(st.grossYieldPrice)} / ${pct(st.grossYieldAllIn)}`],
+      ['Gross yield on end value', pct(st.grossYieldGdv)],
+      ['Net yield (before mortgage)', pct(st.netYield)],
+      ['ROI on money left in', r.moneyOut && st.cashflow > 0 ? '∞ (all money out)' : pct(st.roi)],
+      ...extra,
+    ]);
+  }
+
+  function renderCompare(r, key) {
+    const keys = ['full', 'lodger', 'hmo', 'sa'];
+    const best = keys.reduce((a, b) => (r.strategies[b].cashflow > r.strategies[a].cashflow ? b : a));
+    $('tbl-compare').innerHTML =
+      '<thead><tr><th scope="col">Strategy</th><th scope="col">Income</th><th scope="col">Cashflow</th><th scope="col">Yield</th><th scope="col">ROI</th></tr></thead><tbody>' +
+      keys.map((k) => {
+        const st = r.strategies[k];
+        return `<tr class="${k === key ? 'mine' : ''}" data-pick="${k}" tabindex="0" title="Show ${STRATEGY_NAME[k]}">
+          <th scope="row">${STRATEGY_SHORT_ROW[k]}${k === best ? ' <small class="tag local">best</small>' : ''}</th>
+          <td>${money(st.income)}</td>
+          <td class="${st.cashflow >= 0 ? 'pos' : 'neg'}">${money(st.cashflow)}</td>
+          <td>${pct(st.grossYieldPrice)}</td>
+          <td>${r.moneyOut && st.cashflow > 0 ? '∞' : pct(st.roi)}</td></tr>`;
+      }).join('') +
+      '</tbody><tfoot><tr><td colspan="5"><small class="muted">Monthly figures. Lodger cashflow is before your own living costs. Click a row to switch strategy.</small></td></tr></tfoot>';
+  }
+
+  function syncStrategy() {
+    const key = $('strategy').value;
+    form.querySelectorAll('[data-strategy]').forEach((el) => { el.hidden = !el.dataset.strategy.split(' ').includes(key); });
   }
 
   // ---------------------------------------------------------------------------
@@ -432,10 +472,14 @@
 
     if (s.rooms.count >= MIN_COMPS) {
       const m = Math.round(s.rooms.median / 5) * 5;
-      hint('roomHint', 'lodgerRoomRent', m, `Your listings: median of ${s.rooms.count} room rents${roomWhere} in the last 12 months (${money(s.rooms.min)}–${money(s.rooms.max)})`);
+      const text = `Your listings: median of ${s.rooms.count} room rents${roomWhere} in the last 12 months (${money(s.rooms.min)}–${money(s.rooms.max)})`;
+      hint('roomHint', 'lodgerRoomRent', m, text);
+      hint('hmoRoomHint', 'hmoRoomRent', m, text);
     } else if (off.room) {
       hint('roomHint', 'lodgerRoomRent', off.room, off.roomText);
+      hint('hmoRoomHint', 'hmoRoomRent', off.room, off.roomText);
     }
+    if (area && !$('hmoRooms').dataset.touched) $('hmoRooms').value = Math.max(1, beds);
 
     const ev = soldEvidence();
     if (ev.stats) {
@@ -558,6 +602,11 @@
 
   function renderSearchLinks() {
     renderSoldLinks();
+    const g = (site, words) => `https://www.google.com/search?q=${encodeURIComponent(`${words} site:${site}`)}`;
+    const a = searchArea();
+    $('saLinks').innerHTML = '<span class="links-label">Check nightly rates:</span>' +
+      [['Airbnb', g('airbnb.co.uk', `${a} entire home`)], ['Booking.com', g('booking.com', `${a} apartment`)], ['AirDNA', `https://www.airdna.co/vacation-rental-data/app/search?query=${encodeURIComponent(a)}`]]
+        .map(([l, u]) => `<a href="${u}" target="_blank" rel="noopener">${l}</a>`).join('');
     const links = Data.listingSearches({ area: searchArea(), beds: Number($('beds').value) || 0, country: $('country').value });
     $('searchLinks').innerHTML =
       '<span class="links-label">Search:</span>' +
@@ -1034,6 +1083,7 @@
     if (id === 'importCsv') { if (e.target.files[0]) importCsv(e.target.files[0]); e.target.value = ''; return; }
     if (id === 'refurbLevel') applyRefurbLevel();
     if (id === 'country') syncCountry();
+    if (id === 'strategy') syncStrategy();
     syncFinanceVisibility();
     if (['propertyType', 'beds', 'excludeNewBuild', 'rtbArea', 'country', 'includeNearby', 'includeNearbySold', 'postcode'].includes(id)) {
       renderComps();
@@ -1096,6 +1146,13 @@
       refreshEstimates();
       return;
     }
+    const pick = e.target.closest('[data-pick]');
+    if (pick) {
+      $('strategy').value = pick.dataset.pick;
+      syncStrategy();
+      render();
+      return;
+    }
     if (e.target.id === 'soldAddSelected') addSoldSelected();
     if (e.target.id === 'soldCancel') { soldPreview = []; $('soldPreview').hidden = true; }
     if (e.target.id === 'addSelected') addSelected();
@@ -1137,12 +1194,18 @@
   });
   $('newsMore').addEventListener('click', () => { newsExpanded = !newsExpanded; renderNews(); });
 
+  document.addEventListener('keydown', (e) => {
+    const pick = e.target.closest && e.target.closest('[data-pick]');
+    if (pick && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); pick.click(); }
+  });
+
   $('resetBtn').addEventListener('click', () => {
     try { localStorage.removeItem(STORE_KEY); } catch (e) { /* ignore */ }
     location.reload();
   });
 
   load();
+  syncStrategy();
   syncFinanceVisibility();
   syncCountry();
   refreshEstimates();

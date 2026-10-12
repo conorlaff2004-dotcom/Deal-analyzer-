@@ -111,3 +111,23 @@ test('postcode normalising', () => {
   assert.equal(normalisePostcode('m145tq'), 'M14 5TQ');
   assert.equal(normalisePostcode(' sw1a 1aa '), 'SW1A 1AA');
 });
+
+test('HMO and serviced accommodation income', () => {
+  const r = analyseDeal({
+    ...base,
+    hmoRooms: 5, hmoRoomRent: 500, hmoManagementPct: 15, hmoVoidsPct: 5, hmoBillsMonthly: 400, hmoLicenceYearly: 1200, hmoCleaningMonthly: 60,
+    saNightlyRate: 100, saOccupancyPct: 60, saAvgStay: 3, saCleaningPerStay: 40, saPlatformPct: 15, saManagementPct: 0, saBillsMonthly: 250, saSuppliesMonthly: 50, saLicenceYearly: 0,
+  });
+  const h = r.hmo;
+  assert.equal(h.income, 2500);
+  // 375 mgmt + 125 voids + 400 bills + 100 licence + 60 cleaning + 125 maintenance + 20 insurance
+  assert.equal(h.opex, 1205);
+  assert.equal(h.cashflow, 2500 - 1205 - 562.5);
+  assert.ok(h.icrPass);
+  const s = r.sa;
+  const nights = (365 / 12) * 0.6;
+  assert.ok(Math.abs(s.income - nights * 100) < 1e-9);
+  assert.ok(Math.abs(s.costs.cleaning - (nights / 3) * 40) < 1e-9);
+  assert.ok(Math.abs(s.costs.platform - s.income * 0.15) < 1e-9);
+  assert.deepEqual(Object.keys(r.strategies), ['full', 'lodger', 'hmo', 'sa']);
+});

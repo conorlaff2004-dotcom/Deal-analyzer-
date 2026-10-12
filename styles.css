@@ -266,3 +266,21 @@ textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .comps.by-area .tag { margin-left: 6px; font-family: var(--f-body); }
 .comps-summary b.pos { color: var(--good); }
 .comps-summary b.neg { color: var(--bad); }
+
+/* Strategy picker and comparison */
+.strategy-pick { max-width: 420px; }
+.strategy-pick select { font: 600 1rem var(--f-body); border-color: var(--ocean); background: var(--field); }
+.scroll-x { overflow-x: auto; }
+.breakdown table.compare thead th { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; padding-block: 6px; }
+.breakdown table.compare thead th:not(:first-child) { text-align: right; }
+.breakdown table.compare tbody th { color: var(--ink); font-weight: 500; white-space: nowrap; }
+.breakdown table.compare tr[data-pick] { cursor: pointer; }
+.breakdown table.compare tr[data-pick]:hover, .breakdown table.compare tr[data-pick]:focus-visible { background: rgba(31, 143, 191, 0.12); outline: none; }
+.breakdown table.compare tr.mine { background: rgba(79, 209, 197, 0.12); }
+.breakdown table.compare tr.mine th { box-shadow: inset 3px 0 0 var(--lagoon); }
+.breakdown table.compare tfoot td { text-align: left; white-space: normal; }
+.breakdown table.compare .tag { margin-left: 4px; }
+.panel > div[data-strategy]:not(.grid) { display: grid; gap: 14px; }
+.breakdown table.compare th, .breakdown table.compare td { padding-inline: 8px; }
+.breakdown table.compare th:first-child, .breakdown table.compare td:first-child { padding-left: 16px; }
+.breakdown table.compare tfoot td { font-family: var(--f-body); padding: 6px 16px 4px; }

@@ -3,7 +3,7 @@
   "short_name": "Deal Analyzer",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#f3f5f4",
-  "theme_color": "#1f6f5c",
+  "background_color": "#0B1D2A",
+  "theme_color": "#0B1D2A",
   "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
 }

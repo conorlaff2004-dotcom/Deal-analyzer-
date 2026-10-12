@@ -55,6 +55,12 @@
     return data.result;
   }
 
+  // Postcode districts near this one (BT12 -> BT9, BT13, ...), nearest first.
+  async function nearbyOutcodes(outcode, radius = 4000) {
+    const data = await fetchJson(`${POSTCODES_API}/outcodes/${encodeURIComponent(outcode)}/nearest?limit=12&radius=${radius}`);
+    return ((data && data.result) || []).map((r) => r.outcode).filter((o) => o && o !== outcode);
+  }
+
   async function nearbyPostcodes(lat, lon, radius) {
     const url = `${POSTCODES_API}/postcodes?lon=${lon}&lat=${lat}&radius=${radius}&limit=100`;
     const data = await fetchJson(url);
@@ -408,6 +414,7 @@ LIMIT 1000`;
     normalisePostcode,
     lookupPostcode,
     nearbyPostcodes,
+    nearbyOutcodes,
     soldPrices,
     soldPricesQuery,
     propertyDataRent,

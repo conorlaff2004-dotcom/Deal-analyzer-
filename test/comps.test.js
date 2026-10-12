@@ -101,3 +101,30 @@ test('JSON-stat parsing and RTB location matching', () => {
   assert.equal(matchRtbLocation('Naas', locs), 'Naas, Kildare');
   assert.equal(matchRtbLocation('D06 X2Y3', locs), 'Dublin 6');
 });
+
+test('rents are kept apart by postcode district', () => {
+  const { summariseComps, summariseByDistrict, extractDistrict, districtOf } = require('../js/comps.js');
+  assert.equal(extractDistrict('4 Rockville St, Belfast BT12 5AB'), 'BT12');
+  assert.equal(extractDistrict('Ormeau Rd, BT7'), 'BT7');
+  assert.equal(extractDistrict('Rathmines, Dublin 6'), 'D06');
+  assert.equal(extractDistrict('Main St, Naas W91 X2Y3'), 'W91');
+  assert.equal(districtOf('bt12 5ab'), 'BT12');
+  const c = (district, rent) => ({ date: '2025-09-01', beds: 3, kind: 'whole', rent, currency: 'GBP', district });
+  const comps = [c('BT12', 900), c('BT12', 950), c('BT12', 1000), c('BT7', 1300), c('BT7', 1400), c('BT7', 1500)];
+  const opts = { beds: 3, today: '2025-10-01', currency: 'GBP' };
+  assert.equal(summariseComps(comps, { ...opts, districts: ['BT12'] }).sameBeds.median, 950);
+  assert.equal(summariseComps(comps, { ...opts, districts: ['bt7'] }).sameBeds.median, 1400);
+  assert.equal(summariseComps(comps, opts).sameBeds.median, 1150); // every area
+  const rows = summariseByDistrict(comps, opts);
+  assert.deepEqual(rows.map((r) => [r.district, r.sameBeds.median]), [['BT7', 1400], ['BT12', 950]]);
+});
+
+test('parsed listings carry their district', () => {
+  const r = parseListings('3 Bed Terrace\n12 Donegall Avenue, Belfast, BT12\n£950 pcm\n\n3 bed terrace\n9 Ormeau Road, Belfast BT7 1AB\n£1,300 pcm', {});
+  assert.deepEqual(r.map((x) => x.district), ['BT12', 'BT7']);
+});
+
+test('a short listing followed by a room listing stays two listings', () => {
+  const r = parseListings('3 bed terrace\n5 Rugby Road, Belfast BT7\n£1,500 pcm\n\nDouble room\nCollege Park, BT7\n£120 pw', {});
+  assert.deepEqual(r.map((x) => [x.rent, x.kind]), [[1500, 'whole'], [520, 'room']]);
+});

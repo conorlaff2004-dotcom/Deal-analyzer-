@@ -196,7 +196,7 @@
     <!-- Rent evidence -->
     <section class="panel" aria-labelledby="h-comps" id="compsPanel">
       <h2 id="h-comps">Rent evidence from listings</h2>
-      <p class="note">Search the listing sites for the area, copy what you find and paste it here. Rents from the last 12 months set the full-let and room rent once you have 3 or more.</p>
+      <p class="note">Search the listing sites for the area, copy what you find and paste it here. Each rent is saved against its postcode district (BT12, BT7, D06…). Once the district you’re buying in has 3 or more rents from the last 12 months, they set the full-let and room rent.</p>
       <div class="links" id="searchLinks"></div>
       <label class="f">Paste listings
         <textarea id="pasteBox" rows="5" placeholder="Copy a search results page or a single listing (Ctrl+A, Ctrl+C) and paste it here. Rents, bedrooms, type, address and dates are picked out for you to check."></textarea>
@@ -216,6 +216,8 @@
         </div>
       </div>
       <div id="compsSummary" class="comps-summary"></div>
+      <label class="f check"><input id="includeNearby" type="checkbox"> Include nearby districts when this area has fewer than 3 rents</label>
+      <div class="scroll" id="areaRentsWrap" hidden><table class="comps by-area" id="areaRents"></table></div>
       <div class="scroll"><table class="comps saved" id="compsTable"></table></div>
 
       <div class="news" aria-labelledby="h-news">

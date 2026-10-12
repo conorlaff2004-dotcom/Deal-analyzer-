@@ -296,6 +296,7 @@
     $('country').value = country;
     syncCountry();
     area = { country, pc, info, label: `${pc.split(' ')[0]} ${info.admin_district || ''}`.trim(), sales: [] };
+    try { area.nearbyDistricts = await Data.nearbyOutcodes(info.outcode || pc.split(' ')[0]); } catch (e) { area.nearbyDistricts = []; }
 
     if (country === 'England' || country === 'Wales') {
       status(`Finding sales near ${pc}…`);
@@ -411,22 +412,27 @@
   // Your own listings (3+ in the last 12 months) beat official figures.
   function refreshEstimates() {
     const beds = Number($('beds').value) || 0;
-    const s = Comps.summariseComps(comps, { beds, months: 12, currency: currency() });
+    const scope = rentScope();
+    const s = Comps.summariseComps(comps, { beds, months: 12, currency: currency(), districts: scope.whole.districts });
+    const sr = Comps.summariseComps(comps, { beds, months: 12, currency: currency(), districts: scope.rooms.districts });
+    s.rooms = sr.rooms;
     const off = officialRents() || {};
+    const where = scope.whole.label === 'all areas' ? '' : ` in ${scope.whole.label}`;
+    const roomWhere = scope.rooms.label === 'all areas' ? '' : ` in ${scope.rooms.label}`;
 
     if (s.sameBeds.count >= MIN_COMPS) {
       const m = Math.round(s.sameBeds.median / 5) * 5;
       hint('rentHint', 'fullLetRent', m,
-        `Your listings: median of ${s.sameBeds.count} ${beds}-bed rents in the last 12 months (${money(s.sameBeds.min)}–${money(s.sameBeds.max)})` +
+        `Your listings: median of ${s.sameBeds.count} ${beds}-bed rents${where} in the last 12 months (${money(s.sameBeds.min)}–${money(s.sameBeds.max)})` +
         (off.fullLet ? `. Official figure ${money(off.fullLet)}` : ''));
     } else if (off.fullLet) {
       const need = MIN_COMPS - s.sameBeds.count;
-      hint('rentHint', 'fullLetRent', off.fullLet, `${off.fullLetText}. Add ${need} more ${beds}-bed listing${need > 1 ? 's' : ''} to use local rents`);
+      hint('rentHint', 'fullLetRent', off.fullLet, `${off.fullLetText}. Add ${need} more ${beds}-bed listing${need > 1 ? 's' : ''}${where} to use local rents`);
     }
 
     if (s.rooms.count >= MIN_COMPS) {
       const m = Math.round(s.rooms.median / 5) * 5;
-      hint('roomHint', 'lodgerRoomRent', m, `Your listings: median of ${s.rooms.count} room rents in the last 12 months (${money(s.rooms.min)}–${money(s.rooms.max)})`);
+      hint('roomHint', 'lodgerRoomRent', m, `Your listings: median of ${s.rooms.count} room rents${roomWhere} in the last 12 months (${money(s.rooms.min)}–${money(s.rooms.max)})`);
     } else if (off.room) {
       hint('roomHint', 'lodgerRoomRent', off.room, off.roomText);
     }
@@ -446,6 +452,7 @@
     }
 
     if (area && !$('lodgerRooms').dataset.touched) $('lodgerRooms').value = Math.max(0, beds - 1);
+    renderComps();
     render();
   }
 
@@ -502,8 +509,36 @@
   const SOURCES = ['PropertyPal', 'PropertyNews', 'Daft', 'Rightmove', 'Zoopla', 'MyHome', 'Rent.ie', 'SpareRoom', 'Agent', 'Other'];
 
   function loadComps() {
-    try { return JSON.parse(localStorage.getItem(COMPS_KEY) || '[]'); } catch (e) { return []; }
+    let list = [];
+    try { list = JSON.parse(localStorage.getItem(COMPS_KEY) || '[]'); } catch (e) { /* ignore */ }
+    // Rents saved before areas existed: take the district from the address.
+    return list.map((c) => ('district' in c ? c : { ...c, district: Comps.extractDistrict(c.address) }));
   }
+
+  // The district being analysed: BT12, M14, D06, or the Irish town.
+  function subjectDistrict() {
+    const d = Comps.districtOf($('postcode').value);
+    if (d) return d;
+    if ($('country').value === 'Ireland') return Comps.normaliseDistrict(($('rtbArea').value || $('postcode').value).split(',')[0]);
+    return '';
+  }
+
+  // Which areas' rents count for this deal. Whole lets and rooms widen to
+  // nearby districts separately, and only when the box is ticked.
+  function rentScope() {
+    const d = subjectDistrict();
+    if (!d) return { whole: { districts: null, label: 'all areas' }, rooms: { districts: null, label: 'all areas' } };
+    const beds = Number($('beds').value) || 0;
+    const own = Comps.summariseComps(comps, { beds, months: 12, currency: currency(), districts: [d] });
+    const nearby = (area && area.nearbyDistricts) || [];
+    const widen = (short) => {
+      if (!$('includeNearby').checked || !nearby.length || !short) return { districts: [d], label: d };
+      const used = nearby.filter((n) => comps.some((c) => Comps.normaliseDistrict(c.district) === n));
+      return { districts: [d, ...nearby], label: used.length ? `${d} + nearby ${used.slice(0, 4).join(', ')}` : d };
+    };
+    return { whole: widen(own.sameBeds.count < MIN_COMPS), rooms: widen(own.rooms.count < MIN_COMPS) };
+  }
+
   function saveComps() {
     try { localStorage.setItem(COMPS_KEY, JSON.stringify(comps)); } catch (e) { /* storage unavailable */ }
   }
@@ -534,7 +569,7 @@
     const source = detectSource(text);
     const cur = currency();
     preview = Comps.parseListings(text).map((c) => ({
-      ...c, source, currency: c.currency || cur,
+      ...c, source, currency: c.currency || cur, district: c.district || subjectDistrict(),
       beds: c.beds === null && c.kind !== 'room' ? Number($('beds').value) || null : c.beds,
       keep: c.currency === cur,
     }));
@@ -542,7 +577,7 @@
   }
 
   function addManual() {
-    preview.push({ rent: '', currency: currency(), beds: Number($('beds').value) || null, kind: 'whole', type: $('propertyType').value, address: '', date: new Date().toISOString().slice(0, 10), status: 'listed', source: detectSource(''), keep: true });
+    preview.push({ rent: '', currency: currency(), district: subjectDistrict(), beds: Number($('beds').value) || null, kind: 'whole', type: $('propertyType').value, address: '', date: new Date().toISOString().slice(0, 10), status: 'listed', source: detectSource(''), keep: true });
     renderPreview('');
   }
 
@@ -553,11 +588,12 @@
     const opt = (list, v) => list.map((o) => `<option${o === v ? ' selected' : ''}>${o}</option>`).join('');
     el.innerHTML =
       `<p class="note">Found ${preview.length}. Check them, untick any that aren’t comparable, then add.</p>` +
-      '<div class="scroll"><table class="comps preview"><thead><tr><th>Add</th><th>Date seen</th><th>Address</th><th>Beds</th><th>Let as</th><th>Rent / month</th><th>Source</th><th>Status</th></tr></thead><tbody>' +
+      '<div class="scroll"><table class="comps preview"><thead><tr><th>Add</th><th>Date seen</th><th>Address</th><th>Area</th><th>Beds</th><th>Let as</th><th>Rent / month</th><th>Source</th><th>Status</th></tr></thead><tbody>' +
       preview.map((c, k) => `<tr data-k="${k}">
         <td><input type="checkbox" data-f="keep" ${c.keep ? 'checked' : ''} aria-label="Add this rent"></td>
         <td><input type="date" data-f="date" value="${escapeHtml(c.date)}"></td>
         <td><input type="text" data-f="address" value="${escapeHtml(c.address)}" placeholder="Street, area"></td>
+        <td><input type="text" data-f="district" value="${escapeHtml(c.district || '')}" placeholder="BT12" class="narrow" autocapitalize="characters"></td>
         <td><input type="number" data-f="beds" value="${c.beds ?? ''}" min="0" max="12" class="narrow"></td>
         <td><select data-f="kind">${['whole', 'room'].map((o) => `<option value="${o}"${o === c.kind ? ' selected' : ''}>${o === 'room' ? 'Room' : 'Whole property'}</option>`).join('')}</select></td>
         <td><span class="cur-in">${c.currency === 'EUR' ? '€' : '£'}<input type="number" data-f="rent" value="${c.rent}" step="5"></span></td>
@@ -578,7 +614,7 @@
   }
 
   function addSelected() {
-    const add = preview.filter((c) => c.keep && Number(c.rent) > 0).map(({ keep, ...c }) => ({ ...c, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7) }));
+    const add = preview.filter((c) => c.keep && Number(c.rent) > 0).map(({ keep, ...c }) => ({ ...c, district: Comps.normaliseDistrict(c.district), id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7) }));
     comps = comps.concat(add);
     saveComps();
     preview = [];
@@ -591,26 +627,48 @@
   function renderComps() {
     const beds = Number($('beds').value) || 0;
     const cur = currency();
-    const s = Comps.summariseComps(comps, { beds, months: 12, currency: cur });
+    const scope = rentScope();
+    const here = subjectDistrict();
+    const s = Comps.summariseComps(comps, { beds, months: 12, currency: cur, districts: scope.whole.districts });
+    const sr = Comps.summariseComps(comps, { beds, months: 12, currency: cur, districts: scope.rooms.districts });
     $('compsTitle').textContent = `Saved rents (${comps.length})`;
     $('compsSummary').innerHTML = comps.length
       ? [
-          `<span><b>${s.recentCount}</b> in the last 12 months</span>`,
-          `<span>${beds}-bed median <b>${s.sameBeds.count ? money(s.sameBeds.median) : '–'}</b> (${s.sameBeds.count})</span>`,
-          `<span>All whole lets median <b>${s.allWhole.count ? money(s.allWhole.median) : '–'}</b> (${s.allWhole.count})</span>`,
-          `<span>Rooms median <b>${s.rooms.count ? money(s.rooms.median) : '–'}</b> (${s.rooms.count})</span>`,
+          `<span>${beds}-bed median <b>${s.sameBeds.count ? money(s.sameBeds.median) : '–'}</b> (${s.sameBeds.count}, ${escapeHtml(scope.whole.label)})</span>`,
+          `<span>Rooms median <b>${sr.rooms.count ? money(sr.rooms.median) : '–'}</b> (${sr.rooms.count}, ${escapeHtml(scope.rooms.label)})</span>`,
         ].join('')
       : '<span class="muted">No rents saved yet. Use the search links, then paste what you find.</span>';
 
+    // Rents by area: shows how districts compare (e.g. BT12 vs BT7).
+    const rows = Comps.summariseByDistrict(comps, { beds, months: 12, currency: cur });
+    const nearby = new Set((area && area.nearbyDistricts) || []);
+    $('areaRentsWrap').hidden = rows.length < 1;
+    $('areaRents').innerHTML = rows.length
+      ? `<caption>Rents by area, last 12 months</caption><thead><tr><th scope="col">Area</th><th scope="col">${beds}-bed median</th><th scope="col">${beds}-bed range</th><th scope="col">All whole lets</th><th scope="col">Rooms</th></tr></thead><tbody>` +
+        rows.map((r) => {
+          const mine = r.district && r.district === here;
+          const tag = mine ? ' <small class="tag local">buying here</small>' : nearby.has(r.district) ? ' <small class="tag">nearby</small>' : '';
+          return `<tr class="${mine ? 'mine' : ''}">
+            <th scope="row">${r.district ? escapeHtml(r.district) : '<span class="muted">No area</span>'}${tag}</th>
+            <td>${r.sameBeds.count ? `${money(r.sameBeds.median)} <small>(${r.sameBeds.count})</small>` : '–'}</td>
+            <td>${r.sameBeds.count > 1 ? `${money(r.sameBeds.min)}–${money(r.sameBeds.max)}` : '–'}</td>
+            <td>${r.allWhole.count ? `${money(r.allWhole.median)} <small>(${r.allWhole.count})</small>` : '–'}</td>
+            <td>${r.rooms.count ? `${money(r.rooms.median)} <small>(${r.rooms.count})</small>` : '–'}</td></tr>`;
+        }).join('') + '</tbody>'
+      : '';
+
     const sorted = comps.slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
     $('compsTable').innerHTML = sorted.length
-      ? '<thead><tr><th scope="col">Date</th><th scope="col">Address</th><th scope="col">Beds</th><th scope="col">Let as</th><th scope="col">Rent / month</th><th scope="col">Source</th><th scope="col"><span class="sr">Remove</span></th></tr></thead><tbody>' +
+      ? '<thead><tr><th scope="col">Date</th><th scope="col">Address</th><th scope="col">Area</th><th scope="col">Beds</th><th scope="col">Let as</th><th scope="col">Rent / month</th><th scope="col">Source</th><th scope="col"><span class="sr">Remove</span></th></tr></thead><tbody>' +
         sorted.map((c) => {
           const old = !Comps.withinMonths(c.date, 12);
-          const match = c.kind !== 'room' && Number(c.beds) === beds;
-          return `<tr class="${old ? 'old' : ''} ${match ? 'mine' : ''}">
+          const sc = c.kind === 'room' ? scope.rooms : scope.whole;
+          const inScope = !sc.districts || sc.districts.includes(Comps.normaliseDistrict(c.district));
+          const match = inScope && c.kind !== 'room' && Number(c.beds) === beds;
+          return `<tr class="${old || !inScope ? 'old' : ''} ${match ? 'mine' : ''}">
             <td>${fmtDay(c.date)}${old ? ' <small>older</small>' : ''}</td>
             <td>${escapeHtml(c.address || '–')}${c.status === 'let agreed' ? ' <small class="tag">let agreed</small>' : ''}</td>
+            <td>${escapeHtml(c.district || '–')}</td>
             <td>${c.kind === 'room' ? '–' : c.beds ?? '?'}</td>
             <td>${c.kind === 'room' ? 'Room' : TYPE_LABEL[c.type] || 'Whole'}</td>
             <td>${money(Number(c.rent), c.currency || 'GBP')}</td>
@@ -784,7 +842,7 @@
     if (id === 'refurbLevel') applyRefurbLevel();
     if (id === 'country') syncCountry();
     syncFinanceVisibility();
-    if (['propertyType', 'beds', 'excludeNewBuild', 'rtbArea', 'country'].includes(id)) {
+    if (['propertyType', 'beds', 'excludeNewBuild', 'rtbArea', 'country', 'includeNearby', 'postcode'].includes(id)) {
       renderComps();
       renderSearchLinks();
       refreshEstimates();

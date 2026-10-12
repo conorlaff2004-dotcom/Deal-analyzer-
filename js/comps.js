@@ -24,6 +24,50 @@
   const EIRCODE = /\b(?:[AC-FHKNPRTV-Y]\d{2}|D6W)(?:\s?[0-9AC-FHKNPRTV-Y]{4})?\b/;
   const DATE_RE = /(?:added|listed|posted|reduced|available|let agreed)[^\d\n]{0,12}(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/i;
 
+  // ---------------------------------------------------------------------------
+  // Areas: rents are grouped by postcode district (BT12, M14) or, in Ireland,
+  // Eircode routing key (D06, W91).
+  // ---------------------------------------------------------------------------
+
+  const FULL_UK_PC = /\b([A-Z]{1,2}\d[A-Z\d]?)\s*\d[A-Z]{2}\b/i;
+  const BT_DISTRICT = /\bBT\s?(\d{1,2})\b/i;
+  const EIR_KEY = /\b([AC-FHKNPRTV-Y]\d{2}|D6W)(?:\s?[0-9AC-FHKNPRTV-Y]{4})\b/i;
+  const DUBLIN_N = /\bDublin\s*(\d{1,2}w?)\b/i;
+
+  function normaliseDistrict(d) {
+    let s = String(d || '').toUpperCase().replace(/\s+/g, '');
+    const dub = s.match(/^D(\d)(W?)$/);
+    if (dub) s = `D0${dub[1]}${dub[2]}`;
+    if (s === 'D06W') s = 'D6W';
+    return s;
+  }
+
+  /** Postcode district / Eircode routing key mentioned in some text, or ''. */
+  function extractDistrict(text) {
+    const t = String(text || '');
+    let m = t.match(FULL_UK_PC);
+    if (m && !EIR_KEY.test(m[0])) return normaliseDistrict(m[1]);
+    m = t.match(BT_DISTRICT);
+    if (m) return 'BT' + Number(m[1]);
+    m = t.match(EIR_KEY);
+    if (m) return normaliseDistrict(m[1]);
+    m = t.match(DUBLIN_N);
+    if (m) return normaliseDistrict('D' + m[1]);
+    return '';
+  }
+
+  /** District for what the user typed in the postcode box (full or partial). */
+  function districtOf(input) {
+    const t = String(input || '').trim().toUpperCase();
+    const full = t.match(/^([A-Z]{1,2}\d[A-Z\d]?)\s*\d[A-Z]{2}$/);
+    if (full) return full[1];
+    const eir = t.match(/^([AC-FHKNPRTV-Y]\d{2}|D6W)(\s*[0-9AC-FHKNPRTV-Y]{4})?$/);
+    if (eir) return normaliseDistrict(eir[1]);
+    const part = t.match(/^([A-Z]{1,2}\d[A-Z\d]?)$/);
+    if (part) return part[1];
+    return extractDistrict(t);
+  }
+
   function toMonthly(amount, period) {
     if (period && PERIOD_WEEK.test(period.trim())) return Math.round((amount * 52) / 12);
     return amount;
@@ -48,7 +92,7 @@
       if (rent < 150 || rent > 15000) continue; // not a monthly residential rent
       // "£950 pcm (£219 pw)": the second price restates the first
       const prev = matches[matches.length - 1];
-      if (prev && m.index - prev.end < 40) continue;
+      if (prev && m.index - prev.end < 40 && !/\n/.test(text.slice(prev.end, m.index))) continue;
       matches.push({ start: m.index, end: m.index + m[0].length, rent, currency: m[1] === '€' ? 'EUR' : 'GBP' });
     }
 
@@ -96,7 +140,8 @@
       const key = `${p.rent}|${beds}|${kind}|${address}`;
       if (seen.has(key)) return; // same listing pasted twice / price repeated on a detail page
       seen.add(key);
-      out.push({ rent: p.rent, currency: p.currency, beds, kind, type, address, date, status });
+      const district = extractDistrict(address) || extractDistrict(win);
+      out.push({ rent: p.rent, currency: p.currency, beds, kind, type, address, district, date, status });
     });
     return out;
   }
@@ -133,9 +178,14 @@
   /**
    * Summarise saved comparables for the subject property.
    * Whole-property rents for the same bedroom count; rooms separately.
+   * `districts`: only rents tagged with one of these areas (null = every area).
    */
-  function summariseComps(comps, { beds, months = 12, today, currency } = {}) {
-    const recent = comps.filter((c) => withinMonths(c.date, months, today) && (!currency || !c.currency || c.currency === currency));
+  function summariseComps(comps, { beds, months = 12, today, currency, districts = null } = {}) {
+    const want = districts ? new Set(districts.map(normaliseDistrict)) : null;
+    const recent = comps.filter((c) =>
+      withinMonths(c.date, months, today) &&
+      (!currency || !c.currency || c.currency === currency) &&
+      (!want || want.has(normaliseDistrict(c.district))));
     const whole = recent.filter((c) => c.kind !== 'room');
     const sameBeds = whole.filter((c) => Number(c.beds) === Number(beds));
     const rooms = recent.filter((c) => c.kind === 'room');
@@ -146,11 +196,20 @@
     return { recentCount: recent.length, sameBeds: stats(sameBeds), allWhole: stats(whole), rooms: stats(rooms) };
   }
 
+  /** One summary per area, busiest first. Untagged rents are grouped under ''. */
+  function summariseByDistrict(comps, opts = {}) {
+    const names = Array.from(new Set(comps.map((c) => normaliseDistrict(c.district))));
+    return names
+      .map((d) => ({ district: d, ...summariseComps(comps, { ...opts, districts: [d] }) }))
+      .filter((r) => r.recentCount > 0)
+      .sort((a, b) => b.sameBeds.count - a.sameBeds.count || b.recentCount - a.recentCount || a.district.localeCompare(b.district, 'en', { numeric: true }));
+  }
+
   // ---------------------------------------------------------------------------
   // CSV in / out
   // ---------------------------------------------------------------------------
 
-  const CSV_COLS = ['date', 'address', 'beds', 'kind', 'type', 'rent', 'currency', 'status', 'source', 'link'];
+  const CSV_COLS = ['date', 'address', 'district', 'beds', 'kind', 'type', 'rent', 'currency', 'status', 'source', 'link'];
 
   function toCsv(comps) {
     const esc = (v) => {
@@ -188,11 +247,12 @@
       o.rent = Number(o.rent);
       o.beds = o.beds === '' || o.beds === undefined ? null : Number(o.beds);
       o.kind = o.kind === 'room' ? 'room' : 'whole';
+      o.district = normaliseDistrict(o.district) || extractDistrict(o.address);
       return o;
     }).filter((o) => o.rent > 0);
   }
 
-  const api = { parseListings, summariseComps, median, toCsv, fromCsv, withinMonths };
+  const api = { parseListings, summariseComps, summariseByDistrict, extractDistrict, districtOf, normaliseDistrict, median, toCsv, fromCsv, withinMonths };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.DealComps = api;
 })(typeof window !== 'undefined' ? window : globalThis);

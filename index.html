@@ -21,9 +21,38 @@
     <p>Purchase costs, refurb, full-let and lodger rent, yield, ROI and money left in after refinance. Works for Northern Ireland, Ireland and Great Britain, using official rent figures and rents you collect from PropertyPal, PropertyNews, Daft, Rightmove and others.</p>
   </div>
   <div class="top-actions">
+    <button type="button" class="btn ghost sync-btn" id="syncBtn" aria-controls="syncPanel"><span class="dot" id="syncDot" data-tone="off"></span><span id="syncLabel">Not saved online</span></button>
     <button type="button" class="btn ghost" id="resetBtn">Reset to example</button>
   </div>
 </header>
+
+<section class="sync-panel" id="syncPanel" hidden aria-labelledby="h-sync">
+  <div class="comps-head">
+    <h2 id="h-sync">Save online and use on every device</h2>
+    <button type="button" class="link" id="syncClose">Close</button>
+  </div>
+  <div id="syncSetup">
+    <p>Your rents, sales and deal figures are saved to a private file in your own GitHub account. Every change uploads automatically, and each device downloads the latest when you open the app. Do this once on each device:</p>
+    <ol>
+      <li>Open <a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=Deal%20Analyzer%20sync" target="_blank" rel="noopener">GitHub → new access key ↗</a> (sign in if asked).</li>
+      <li>Set <b>Expiration</b> to <b>No expiration</b> or a year. Leave only the <b>gist</b> box ticked.</li>
+      <li>Press <b>Generate token</b>, copy the key that starts with <code>ghp_</code>, and paste it here.</li>
+    </ol>
+    <div class="row wrap">
+      <input id="syncToken" type="password" placeholder="ghp_…" autocomplete="off" aria-label="GitHub access key">
+      <button type="button" class="btn primary" id="syncConnect">Connect</button>
+    </div>
+    <p class="fine">The key stays on this device and can only read and write your gists, not your code. You can use the same key on every device.</p>
+  </div>
+  <div id="syncConnected" hidden>
+    <p>This device is connected. Changes save online a couple of seconds after you make them, and the latest data loads when you open the app.</p>
+    <div class="row wrap">
+      <button type="button" class="btn primary" id="syncNow">Sync now</button>
+      <button type="button" class="btn ghost" id="syncDisconnect">Disconnect this device</button>
+    </div>
+  </div>
+  <p class="status" data-tone="bad" id="syncMsg"></p>
+</section>
 
 <main class="layout">
   <form id="deal" class="inputs" autocomplete="off" novalidate>
@@ -433,6 +462,7 @@
 <script src="js/calc.js"></script>
 <script src="js/data.js"></script>
 <script src="js/comps.js"></script>
+<script src="js/sync.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

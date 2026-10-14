@@ -668,6 +668,7 @@
 
   function saveComps() {
     try { localStorage.setItem(COMPS_KEY, JSON.stringify(comps)); } catch (e) { /* storage unavailable */ }
+    scheduleSync();
   }
 
   function searchArea() {
@@ -851,6 +852,7 @@
   }
   function saveSales() {
     try { localStorage.setItem(SOLD_KEY, JSON.stringify(sales)); } catch (e) { /* storage unavailable */ }
+    scheduleSync();
   }
 
   function soldOpts(districts, beds = bedsAfter()) {
@@ -1112,22 +1114,31 @@
 
   const persisted = () => fieldEls().filter((el) => !el.closest('#parsePreview') && !el.closest('#soldPreview'));
 
+  function formState() {
+    const state = {};
+    for (const el of persisted()) {
+      if (el.type === 'radio') { if (el.checked) state[el.name] = el.value; }
+      else state[el.id] = el.type === 'checkbox' ? el.checked : el.value;
+    }
+    state._touched = persisted().filter((el) => el.dataset.touched).map((el) => el.id);
+    return state;
+  }
+
   function save() {
-    try {
-      const state = {};
-      for (const el of persisted()) {
-        if (el.type === 'radio') { if (el.checked) state[el.name] = el.value; }
-        else state[el.id] = el.type === 'checkbox' ? el.checked : el.value;
-      }
-      state._touched = persisted().filter((el) => el.dataset.touched).map((el) => el.id);
-      localStorage.setItem(STORE_KEY, JSON.stringify(state));
-    } catch (e) { /* storage unavailable */ }
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(formState())); } catch (e) { /* storage unavailable */ }
   }
 
   function load() {
     try {
       const state = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
       if (!state) return;
+      applyState(state);
+      status('Your last figures are loaded. Press <b>Analyse area</b> to refresh local data.');
+    } catch (e) { /* ignore */ }
+  }
+
+  function applyState(state) {
+    try {
       for (const el of persisted()) {
         if (el.type === 'radio') el.checked = state[el.name] === el.value;
         else if (el.id in state) {
@@ -1135,10 +1146,133 @@
           else el.value = state[el.id];
         }
       }
+      persisted().forEach((el) => { delete el.dataset.touched; });
       (state._touched || []).forEach((id) => { if ($(id)) $(id).dataset.touched = '1'; });
-      status('Your last figures are loaded. Press <b>Analyse area</b> to refresh local data.');
     } catch (e) { /* ignore */ }
   }
+
+  // ---------------------------------------------------------------------------
+  // Sync across devices (private GitHub gist)
+  // ---------------------------------------------------------------------------
+
+  const SYNC = { token: 'deal-analyzer:ghToken', gist: 'deal-analyzer:gistId', deleted: 'deal-analyzer:deleted', dealUpdated: 'deal-analyzer:dealUpdated', last: 'deal-analyzer:lastSync' };
+  const NOT_SYNCED = ['pdKey']; // keys stay on each device
+  const ls = {
+    get: (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } },
+    del: (k) => { try { localStorage.removeItem(k); } catch (e) { /* ignore */ } },
+  };
+  let syncTimer = null;
+  let syncing = false;
+  let syncAgain = false;
+
+  function tombstones() {
+    try { return JSON.parse(ls.get(SYNC.deleted) || '{}'); } catch (e) { return {}; }
+  }
+  function forget(items) {
+    const t = tombstones();
+    items.forEach((c) => { if (c.id) t[c.id] = Date.now(); });
+    ls.set(SYNC.deleted, JSON.stringify(t));
+  }
+  function dealEdited() {
+    ls.set(SYNC.dealUpdated, String(Date.now()));
+    scheduleSync(4000);
+  }
+
+  function localData() {
+    const state = formState();
+    NOT_SYNCED.forEach((k) => delete state[k]);
+    return {
+      rents: comps,
+      sales,
+      deleted: tombstones(),
+      deal: { updated: Number(ls.get(SYNC.dealUpdated)) || 0, state },
+    };
+  }
+
+  function applyData(data) {
+    comps = data.rents;
+    sales = data.sales;
+    try {
+      localStorage.setItem(COMPS_KEY, JSON.stringify(comps));
+      localStorage.setItem(SOLD_KEY, JSON.stringify(sales));
+    } catch (e) { /* ignore */ }
+    ls.set(SYNC.deleted, JSON.stringify(data.deleted || {}));
+    const mine = Number(ls.get(SYNC.dealUpdated)) || 0;
+    if (data.deal && data.deal.updated > mine && data.deal.state) {
+      const keep = {};
+      NOT_SYNCED.forEach((k) => { keep[k] = $(k) ? $(k).value : ''; });
+      applyState({ ...data.deal.state, ...keep });
+      ls.set(SYNC.dealUpdated, String(data.deal.updated));
+      save();
+      syncStrategy();
+      syncFinanceVisibility();
+      syncCountry();
+    }
+    refreshEstimates();
+  }
+
+  function scheduleSync(delay = 2000) {
+    if (!ls.get(SYNC.token)) return;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(runSync, delay);
+  }
+
+  async function runSync() {
+    const token = ls.get(SYNC.token);
+    if (!token) return renderSyncStatus();
+    if (syncing) { syncAgain = true; return; }
+    syncing = true;
+    renderSyncStatus('Syncing…', 'busy');
+    try {
+      const { gistId, data } = await window.DealSync.sync(token, ls.get(SYNC.gist), localData());
+      ls.set(SYNC.gist, gistId);
+      ls.set(SYNC.last, String(Date.now()));
+      applyData(data);
+      renderSyncStatus();
+    } catch (e) {
+      renderSyncStatus(e.message, 'bad');
+    } finally {
+      syncing = false;
+      if (syncAgain) { syncAgain = false; scheduleSync(500); }
+    }
+  }
+
+  function renderSyncStatus(text, tone) {
+    const on = !!ls.get(SYNC.token);
+    const last = Number(ls.get(SYNC.last));
+    $('syncDot').dataset.tone = tone || (on ? 'good' : 'off');
+    $('syncLabel').textContent = tone === 'bad' ? 'Not saved online' : text || (on
+      ? (last ? `Saved online ${new Date(last).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : 'Saving online')
+      : 'Not saved online');
+    $('syncSetup').hidden = on;
+    $('syncConnected').hidden = !on;
+    $('syncMsg').textContent = tone === 'bad' ? text : '';
+  }
+
+  $('syncBtn').addEventListener('click', () => {
+    $('syncPanel').hidden = !$('syncPanel').hidden;
+    if (!$('syncPanel').hidden) $('syncPanel').scrollIntoView({ block: 'nearest' });
+  });
+  $('syncClose').addEventListener('click', () => { $('syncPanel').hidden = true; });
+  $('syncConnect').addEventListener('click', async () => {
+    const t = $('syncToken').value.trim();
+    if (!t) { $('syncMsg').textContent = 'Paste your access key first.'; return; }
+    ls.set(SYNC.token, t);
+    $('syncToken').value = '';
+    await runSync();
+    if (!ls.get(SYNC.last)) ls.del(SYNC.token); // didn't work: stay disconnected
+    renderSyncStatus($('syncMsg').textContent || undefined, $('syncMsg').textContent ? 'bad' : undefined);
+  });
+  $('syncNow').addEventListener('click', runSync);
+  $('syncDisconnect').addEventListener('click', () => {
+    [SYNC.token, SYNC.gist, SYNC.last].forEach(ls.del);
+    renderSyncStatus();
+  });
+  // Pick up changes made on another device when you come back to the app.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && Date.now() - (Number(ls.get(SYNC.last)) || 0) > 20000) runSync();
+  });
 
   // ---------------------------------------------------------------------------
   // Events
@@ -1150,6 +1284,7 @@
     if (e.target.id === 'pasteBox' || e.target.id === 'soldPasteBox') return;
     const id = e.target.id;
     if (e.isTrusted && e.target.type !== 'radio') e.target.dataset.touched = '1';
+    if (e.isTrusted) dealEdited();
     if (id === 'refurbBudget') $('refurbLevel').value = '';
     if (id === 'beds' || id === 'floorArea' || id === 'refurbLevel') applyRefurbLevel();
     render();
@@ -1158,6 +1293,7 @@
     if (e.target.closest('#parsePreview')) return previewEdit(e);
     if (e.target.closest('#soldPreview')) return soldPreviewEdit(e);
     const id = e.target.id;
+    if (e.isTrusted && id !== 'importCsv' && id !== 'soldImportCsv') dealEdited();
     if (id === 'soldImportCsv') { if (e.target.files[0]) importSoldCsv(e.target.files[0]); e.target.value = ''; return; }
     if (id === 'importCsv') { if (e.target.files[0]) importCsv(e.target.files[0]); e.target.value = ''; return; }
     if (id === 'refurbLevel') applyRefurbLevel();
@@ -1192,6 +1328,7 @@
       setTimeout(() => { btn.dataset.confirm = ''; btn.textContent = 'Clear all'; }, 4000);
       return;
     }
+    forget(comps);
     comps = [];
     saveComps();
     btn.dataset.confirm = '';
@@ -1214,6 +1351,7 @@
     }
     const rm = e.target.closest('[data-remove]');
     if (rm) {
+      forget(comps.filter((c) => c.id === rm.dataset.remove));
       comps = comps.filter((c) => c.id !== rm.dataset.remove);
       saveComps();
       renderComps();
@@ -1222,6 +1360,7 @@
     }
     const rmSale = e.target.closest('[data-remove-sale]');
     if (rmSale) {
+      forget(sales.filter((c) => c.id === rmSale.dataset.removeSale));
       sales = sales.filter((c) => c.id !== rmSale.dataset.removeSale);
       saveSales();
       refreshEstimates();
@@ -1259,6 +1398,7 @@
       setTimeout(() => { btn.dataset.confirm = ''; btn.textContent = 'Clear all'; }, 4000);
       return;
     }
+    forget(sales);
     sales = [];
     saveSales();
     btn.dataset.confirm = '';
@@ -1291,4 +1431,6 @@
   syncCountry();
   refreshEstimates();
   loadNews();
+  renderSyncStatus();
+  runSync();
 })();

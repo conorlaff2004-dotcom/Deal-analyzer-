@@ -397,7 +397,54 @@
     return { district: d, count: mine.length, groups };
   }
 
-  const api = { rentGroup, summariseRentData, RENT_GROUPS, parseListings, parseSales, summariseSales, summariseSalesByDistrict, SALE_COLS, summariseComps, summariseByDistrict, extractDistrict, districtOf, normaliseDistrict, median, toCsv, fromCsv, withinMonths };
+  // Built-in sale-agreed prices (js/sale-data.js), grouped like the source
+  // spreadsheet: 1-5 bed and 6+.
+  const SALE_GROUPS = ['1', '2', '3', '4', '5', '6+'];
+
+  function saleType(label) {
+    const l = String(label || '').toLowerCase();
+    if (/semi/.test(l)) return 'semi-detached';
+    if (/detached/.test(l)) return 'detached';
+    if (/terrace|townhouse/.test(l)) return 'terraced';
+    if (/apartment|flat|maisonette|duplex/.test(l)) return 'flat';
+    return 'other';
+  }
+
+  function saleStats(list) {
+    const v = list.map((l) => Number(l.price)).filter((x) => x > 0).sort((a, b) => a - b);
+    if (!v.length) return { count: 0 };
+    return {
+      count: v.length,
+      average: v.reduce((a, b) => a + b, 0) / v.length,
+      median: quantile(v, 0.5),
+      lowerQuartile: quantile(v, 0.25),
+      upperQuartile: quantile(v, 0.75),
+      min: v[0],
+      max: v[v.length - 1],
+    };
+  }
+
+  /** `district` null = every area. Groups by bedroom size, plus 'all'. */
+  function summariseSaleData(listings, district) {
+    const d = district ? normaliseDistrict(district) : null;
+    const mine = listings.filter((l) => !d || normaliseDistrict(l.district) === d);
+    const groups = {};
+    for (const g of SALE_GROUPS) groups[g] = saleStats(mine.filter((l) => rentGroup(l.beds) === g));
+    groups.all = saleStats(mine);
+    return { district: d, count: mine.length, groups };
+  }
+
+  /** Same bedrooms and type when there are 3+, otherwise same bedrooms. */
+  function saleEvidence(listings, district, beds, type) {
+    const d = normaliseDistrict(district);
+    const sameBeds = listings.filter((l) => normaliseDistrict(l.district) === d && rentGroup(l.beds) === rentGroup(beds));
+    const both = saleStats(sameBeds.filter((l) => saleType(l.type) === type));
+    if (both.count >= 3) return { ...both, district: d, byType: true };
+    const any = saleStats(sameBeds);
+    return any.count ? { ...any, district: d, byType: false } : null;
+  }
+
+  const api = { saleType, summariseSaleData, saleEvidence, SALE_GROUPS, rentGroup, summariseRentData, RENT_GROUPS, parseListings, parseSales, summariseSales, summariseSalesByDistrict, SALE_COLS, summariseComps, summariseByDistrict, extractDistrict, districtOf, normaliseDistrict, median, toCsv, fromCsv, withinMonths };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.DealComps = api;
 })(typeof window !== 'undefined' ? window : globalThis);

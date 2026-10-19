@@ -379,27 +379,7 @@ LIMIT 1000`;
     return best;
   }
 
-  function soldSearches({ area, beds, country }) {
-    const q = (site, words) => `https://www.google.com/search?q=${encodeURIComponent(`${words} site:${site}`)}`;
-    const bedWords = beds ? `${beds} bed` : '';
-    if (country === 'Ireland') {
-      return [
-        { label: 'Property Price Register', url: 'https://www.propertypriceregister.ie/' },
-        { label: 'Daft.ie sold', url: q('daft.ie', `sold ${bedWords} ${area}`) },
-        { label: 'MyHome.ie', url: q('myhome.ie', `sold ${bedWords} ${area}`) },
-        { label: 'PropertyPal sold', url: q('propertypal.com', `sold ${bedWords} ${area}`) },
-      ];
-    }
-    return [
-      { label: 'PropertyPal sold', url: q('propertypal.com', `sold ${bedWords} ${area}`) },
-      { label: 'PropertyNews sold', url: q('propertynews.com', `sold ${bedWords} ${area}`) },
-      { label: 'Rightmove sold prices', url: q('rightmove.co.uk/house-prices', area) },
-      { label: 'Zoopla sold prices', url: q('zoopla.co.uk/house-prices', area) },
-    ];
-  }
-
   const api = {
-    soldSearches,
     estimateNiRents,
     loadRtb,
     parseJsonStat,

@@ -29,17 +29,17 @@ To update the rents, replace the spreadsheet and regenerate `js/rent-data.js` fr
 
 The rents panel shows recent property headlines (rents, landlords, house prices, housing policy) for Northern Ireland, Ireland and UK landlords. It opens on your country's tab, and stories that mention your area, such as Belfast or Naas, are tagged and shown first. Headlines come from Google News searches over the last 2 weeks. Online, the deploy workflow refreshes them every 3 hours (`scripts/news.js` writes `news.json`). Locally, `server.js` fetches them live, at most once an hour.
 
-## Sold evidence
+## Sale prices
 
-The *Sold evidence* panel works like the rents panel, for sale prices. Search links open sold results on PropertyPal, PropertyNews, Rightmove and Zoopla, or on the Property Price Register, Daft and MyHome for Ireland. Paste a sold results page, a single listing or rows from the Property Price Register. The app picks out the price, bedrooms, type, address, postcode district, sale date and whether it's sold or sale agreed, and you tick the ones to keep.
+Sale prices come from **built-in sale-agreed listings** for BT7 and BT12 (`js/sale-data.js`, made from `data/BT7_BT12_sale_agreed_last_12_months.xlsx`: 230 PropertyPal listings, sale agreed Nov 2025 – Oct 2026). These are **asking prices when the sale was agreed**, not final sold prices. The *Local sale prices* panel has BT7, BT12 and combined tabs. Each shows sales, average, median, lowest and highest by size (1–5 bed, 6+ bed, all sizes), and you can click a size to see its listings.
 
-Sales are grouped by postcode district, like rents. For the property you're analysing, the app looks at your sales from the last 2 years in that district and uses the narrowest group with 3 or more sales: same bedrooms and type, then same bedrooms, then same type. From that group it:
+For the property you're analysing, the app uses sales in its district with the same bedroom count, and the same property type too when there are 3 or more of them. From those it:
 
-- suggests the **end value after refurb** (upper quartile: a refurbished home should sell near the top of the local range)
-- shows how far your **purchase price** is above or below the median
-- fills a **Sold prices by area** table comparing districts
+- suggests the **end value after refurb**, using the upper quartile of the bedroom count after any added bedrooms (it needs 3 or more sales)
+- shows how far your **purchase price** is above or below the median for what you're buying
+- gives the **value uplift** in the add-bedrooms payoff box (e.g. 4-bed vs 3-bed median)
 
-You can tick *Include nearby districts* when your district has too few sales. Your own sold evidence takes priority over Land Registry figures. Export / Import CSV backs it up.
+Outside BT7 and BT12, set the end value yourself; in England and Wales, Land Registry sold prices fill it in (below). To update the figures, replace the spreadsheet and regenerate `js/sale-data.js`.
 
 ## Sold prices (Land Registry)
 
@@ -49,7 +49,7 @@ Northern Ireland doesn't publish individual sale prices. Ireland's Property Pric
 
 ## Saving online across devices
 
-Press **Not saved online** at the top of the app to connect a device. Your saved sold prices and current deal figures are stored in a private GitHub gist in your own account, using an access key with only the `gist` permission. On each device you paste the key once. After that, every change uploads a couple of seconds after you make it, and the app downloads the latest data each time you open it or switch back to it. Data from different devices is merged, so nothing added on one device is lost, and deleting a sale removes it everywhere. Your PropertyData API key and the GitHub key stay on each device.
+Press **Not saved online** at the top of the app to connect a device. Your current deal figures are stored in a private GitHub gist in your own account, using an access key with only the `gist` permission. On each device you paste the key once. After that, every change uploads a couple of seconds after you make it, and the app downloads the latest data each time you open it or switch back to it. Data from different devices is merged, and the most recently edited deal wins. Your PropertyData API key and the GitHub key stay on each device.
 
 ## Using it online
 
@@ -75,8 +75,8 @@ npm test         # unit tests for the tax, deal maths and listing parser
 - `index.html`, `styles.css`: the calculator
 - `js/calc.js`: the deal maths (pure functions, tested)
 - `js/data.js`: postcode, sold price, RTB and NI rent lookups and estimates
-- `js/comps.js`: reads pasted sold listings, summarises sales and the built-in rents (tested)
-- `js/rent-data.js`: built-in let-agreed rents for BT7 and BT12
+- `js/comps.js`: summarises the built-in rents and sale prices by area and size (tested)
+- `js/rent-data.js`, `js/sale-data.js`: built-in let-agreed rents and sale-agreed prices for BT7 and BT12
 - `js/app.js`: wires the form to the maths and renders results
 - `server.js`: static server and API proxy
 

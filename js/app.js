@@ -35,7 +35,6 @@
   function readInputs() {
     const out = {};
     for (const el of fieldEls()) {
-      if (el.closest('#soldPreview')) continue;
       if (el.type === 'radio') {
         if (el.checked) out[el.name] = el.value;
       } else if (el.type === 'checkbox') {
@@ -205,14 +204,19 @@
     const cost = r.refurb.bedroomWorks * (1 + (Number(i.refurbContingencyPct) || 0) / 100);
     const lines = [];
 
-    const vNow = soldEvidence(now);
-    const vAfter = soldEvidence(after);
+    // Compare like with like: both sizes by type, or both across all types.
+    const d = subjectDistrict();
+    const both = [localSaleFor(now), localSaleFor(after)];
+    const sameBasis = both[0] && both[1] && both[0].byType !== both[1].byType
+      ? [Comps.saleEvidence(SALES.listings, d, now, null), Comps.saleEvidence(SALES.listings, d, after, null)] // all types
+      : both;
+    const [vNow, vAfter] = sameBasis;
     let valueUp = null;
-    if (vNow.stats && vAfter.stats && vNow.bedsSpecific && vAfter.bedsSpecific) {
-      valueUp = vAfter.stats.median - vNow.stats.median;
-      lines.push(['Value', `${after}-bed median ${money(vAfter.stats.median)} vs ${now}-bed ${money(vNow.stats.median)}`, signed(valueUp), valueUp > cost ? 'pos' : 'neg']);
+    if (vNow && vAfter && vNow.count >= MIN_COMPS && vAfter.count >= MIN_COMPS) {
+      valueUp = vAfter.median - vNow.median;
+      lines.push(['Value', `${saleWhat(vAfter, after)} median ${money(vAfter.median)} vs ${saleWhat(vNow, now)} ${money(vNow.median)} (sale agreed, ${d})`, signed(valueUp), valueUp > cost ? 'pos' : 'neg']);
     } else {
-      lines.push(['Value', `Add 3+ sales of ${now}-bed and ${after}-bed homes under Sold evidence to see the value uplift`, '–', '']);
+      lines.push(['Value', d && SALE_AREAS.includes(d) ? `Too few ${now}-bed or ${after}-bed sales in ${d} to compare` : `No sale-agreed data for ${d || 'this area'} to compare`, '–', '']);
     }
 
     const rNow = rentFor(now);
@@ -549,12 +553,15 @@
     }
     if (!$('hmoRooms').dataset.touched && (area || Number($('extraBeds').value))) $('hmoRooms').value = Math.max(1, beds);
 
-    const ev = soldEvidence();
-    if (ev.stats) {
-      const gdv = Math.round(ev.stats.upperQuartile / 1000) * 1000;
-      const where = ev.scope.label === 'all areas' ? '' : ` in ${ev.scope.label}`;
+    const ev = localSaleFor(beds);
+    const added = bedsAfter() - bedsNow();
+    const prefix = added ? `After adding ${added} bedroom${added > 1 ? 's' : ''}: ` : '';
+    if (ev && ev.count >= MIN_COMPS) {
+      const gdv = Math.round(ev.upperQuartile / 1000) * 1000;
       hint('gdvHint', 'gdv', gdv,
-        `${bedsAfter() !== bedsNow() ? `After adding ${bedsAfter() - bedsNow()} bedroom${bedsAfter() - bedsNow() > 1 ? 's' : ''}: ` : ''}Your sold evidence: ${ev.stats.count} ${ev.what} sales${where} in the last 2 years, median ${money(ev.stats.median)}, upper quartile ${money(ev.stats.upperQuartile)} (a refurbished home should sell towards the top)`);
+        `${prefix}sale-agreed asking prices in ${ev.district}: ${ev.count} ${saleWhat(ev, beds)} homes, median ${money(ev.median)}, upper quartile ${money(ev.upperQuartile)} (a refurbished home should sell towards the top)`);
+    } else if (ev) {
+      $('gdvHint').textContent = `${prefix}only ${ev.count} ${saleWhat(ev, beds)} sale${ev.count > 1 ? 's' : ''} in ${ev.district} (median ${money(ev.median)}), too few to suggest an end value.`;
     } else if (area && area.country !== 'Ireland' && area.country !== 'Northern Ireland') {
       const type = $('propertyType').value;
       const sameType = summarise(usableSales().filter((x) => x.type === type).map((x) => x.price));
@@ -566,12 +573,12 @@
         $('gdvHint').innerHTML = `Not enough ${TYPE_LABEL[type].toLowerCase()} sales nearby to suggest an end value. Try a bigger radius or longer period.`;
       }
     } else if (area) {
-      $('gdvHint').textContent = `Add 3 or more sales in ${subjectDistrict() || 'this area'} under Sold evidence to get a suggested end value.`;
+      $('gdvHint').textContent = `No sale-agreed data for ${subjectDistrict() || 'this area'} yet. Set the end value from recent sales of similar homes.`;
     }
 
     if (!$('lodgerRooms').dataset.touched && (area || Number($('extraBeds').value))) $('lodgerRooms').value = Math.max(0, beds - 1);
     renderLocalRents();
-    renderSold();
+    renderLocalSales();
     render();
   }
 
@@ -705,7 +712,6 @@
   }
 
   function renderSearchLinks() {
-    renderSoldLinks();
     const g = (site, words) => `https://www.google.com/search?q=${encodeURIComponent(`${words} site:${site}`)}`;
     const a = searchArea();
     $('saLinks').innerHTML = '<span class="links-label">Check nightly rates:</span>' +
@@ -713,190 +719,85 @@
         .map(([l, u]) => `<a href="${u}" target="_blank" rel="noopener">${l}</a>`).join('');
   }
 
-  async function importSoldCsv(file) {
-    const rows = Comps.fromCsv(await file.text(), Comps.SALE_COLS);
-    sales = sales.concat(rows.map((c) => ({ ...c, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7) })));
-    saveSales();
-    refreshEstimates();
-  }
-
   // ---------------------------------------------------------------------------
-  // Sold evidence from listings (same idea as rents, for sale prices)
+  // Local sale prices: built-in sale-agreed listings (js/sale-data.js)
   // ---------------------------------------------------------------------------
 
+  const SALES = window.SaleData || { meta: {}, listings: [] };
+  const SALE_AREAS = Array.from(new Set(SALES.listings.map((l) => l.district))).sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
+  const SALE_LABEL = { 1: '1 bed', 2: '2 bed', 3: '3 bed', 4: '4 bed', 5: '5 bed', '6+': '6+ bed', all: 'All sizes' };
+  let saleView = null; // area tab: a district or 'all'
+  let saleListGroup = null;
+
+  // Sales saved by the old "sold evidence" panel are kept only so online
+  // saving doesn't drop them; nothing reads them any more.
   const SOLD_KEY = 'deal-analyzer:sold';
-  const SOLD_MONTHS = 24;
-  const SOLD_SOURCES = ['PropertyPal', 'PropertyNews', 'Property Price Register', 'Daft', 'MyHome', 'Rightmove', 'Zoopla', 'Agent', 'Other'];
   let sales = loadSales();
-  let soldPreview = [];
-
   function loadSales() {
     try { return JSON.parse(localStorage.getItem(SOLD_KEY) || '[]'); } catch (e) { return []; }
   }
-  function saveSales() {
-    try { localStorage.setItem(SOLD_KEY, JSON.stringify(sales)); } catch (e) { /* storage unavailable */ }
-    scheduleSync();
+
+  /** Sale-agreed prices for this area and size (same type when 3+), or null. */
+  function localSaleFor(beds, district = subjectDistrict()) {
+    if (!SALE_AREAS.includes(district)) return null;
+    return Comps.saleEvidence(SALES.listings, district, beds, $('propertyType').value);
   }
 
-  function soldOpts(districts, beds = bedsAfter()) {
-    return { beds, type: $('propertyType').value, months: SOLD_MONTHS, currency: currency(), districts };
+  function saleWhat(ev, beds) {
+    return `${Comps.rentGroup(beds)}-bed${ev.byType ? ' ' + TYPE_LABEL[$('propertyType').value].toLowerCase() : ''}`;
   }
 
-  function soldScope(beds = bedsAfter()) {
-    const d = subjectDistrict();
-    if (!d) return { districts: null, label: 'all areas' };
-    const own = Comps.summariseSales(sales, soldOpts([d], beds));
-    const nearby = (area && area.nearbyDistricts) || [];
-    if ($('includeNearbySold').checked && nearby.length && own.sameBeds.count < MIN_COMPS) {
-      const used = nearby.filter((n) => sales.some((c) => Comps.normaliseDistrict(c.district) === n));
-      return { districts: [d, ...nearby], label: used.length ? `${d} + nearby ${used.slice(0, 4).join(', ')}` : d };
-    }
-    return { districts: [d], label: d };
+  function salePeriod() {
+    const dates = SALES.listings.map((l) => l.date).sort();
+    return dates.length ? `${fmtDate(dates[0])} – ${fmtDate(dates[dates.length - 1])}` : '';
   }
 
-  // The narrowest group of your sales with at least 3 in it.
-  // `beds` defaults to the bedrooms after works (for the end value).
-  function soldEvidence(beds = bedsAfter()) {
-    const scope = soldScope(beds);
-    const s = Comps.summariseSales(sales, soldOpts(scope.districts, beds));
-    const typeName = TYPE_LABEL[$('propertyType').value].toLowerCase();
-    const pick = [
-      [s.bedsAndType, `${beds}-bed ${typeName}`],
-      [s.sameBeds, `${beds}-bed`],
-      [s.sameType, typeName],
-    ].find(([st]) => st.count >= MIN_COMPS);
-    return pick ? { stats: pick[0], what: pick[1], scope, bedsSpecific: pick[0] !== s.sameType } : { stats: null, scope, summary: s };
-  }
-
-  function renderSoldLinks() {
-    const links = Data.soldSearches({ area: searchArea(), beds: bedsNow(), country: $('country').value });
-    $('soldLinks').innerHTML = '<span class="links-label">Search:</span>' +
-      links.map((l) => `<a href="${l.url}" target="_blank" rel="noopener">${escapeHtml(l.label)}</a>`).join('');
-  }
-
-  function detectSoldSource(text) {
-    const t = text.toLowerCase();
-    if (t.includes('propertypriceregister') || /second-hand dwelling|new dwelling/i.test(text)) return 'Property Price Register';
-    const map = [['propertypal', 'PropertyPal'], ['propertynews', 'PropertyNews'], ['daft', 'Daft'], ['myhome', 'MyHome'], ['rightmove', 'Rightmove'], ['zoopla', 'Zoopla']];
-    const hit = map.find(([k]) => t.includes(k));
-    return hit ? hit[1] : $('country').value === 'Ireland' ? 'Property Price Register' : 'PropertyPal';
-  }
-
-  function parseSoldPasted() {
-    const text = $('soldPasteBox').value;
-    if (!text.trim()) return;
-    const source = detectSoldSource(text);
-    const cur = currency();
-    soldPreview = Comps.parseSales(text).map((c) => ({ ...c, source, district: c.district || subjectDistrict(), keep: c.currency === cur }));
-    renderSoldPreview(soldPreview.length ? '' : 'No sale prices found in that text. Copy the page again including the prices, or add one by hand.');
-  }
-
-  function addSoldManual() {
-    soldPreview.push({ price: '', currency: currency(), district: subjectDistrict(), beds: bedsNow() || null, type: $('propertyType').value, address: '', date: new Date().toISOString().slice(0, 10), status: 'sold', source: detectSoldSource(''), keep: true });
-    renderSoldPreview('');
-  }
-
-  function renderSoldPreview(message) {
-    const el = $('soldPreview');
-    el.hidden = false;
-    if (!soldPreview.length) { el.innerHTML = `<p class="status" data-tone="warn">${message}</p>`; return; }
-    const opt = (list, v) => list.map((o) => `<option${o === v ? ' selected' : ''}>${o}</option>`).join('');
-    const types = [['', '?'], ['terraced', 'Terraced'], ['semi-detached', 'Semi'], ['detached', 'Detached'], ['flat', 'Flat']];
-    el.innerHTML =
-      `<p class="note">Found ${soldPreview.length}. Check them, untick any that aren’t comparable, then add.</p>` +
-      '<div class="scroll"><table class="comps preview"><thead><tr><th>Add</th><th>Sale date</th><th>Address</th><th>Area</th><th>Beds</th><th>Type</th><th>Price</th><th>Source</th><th>Status</th></tr></thead><tbody>' +
-      soldPreview.map((c, k) => `<tr data-k="${k}">
-        <td><input type="checkbox" data-f="keep" ${c.keep ? 'checked' : ''} aria-label="Add this sale"></td>
-        <td><input type="date" data-f="date" value="${escapeHtml(c.date)}"></td>
-        <td><input type="text" data-f="address" value="${escapeHtml(c.address)}" placeholder="Street, area"></td>
-        <td><input type="text" data-f="district" value="${escapeHtml(c.district || '')}" placeholder="BT12" class="narrow" autocapitalize="characters"></td>
-        <td><input type="number" data-f="beds" value="${c.beds ?? ''}" min="0" max="12" class="narrow"></td>
-        <td><select data-f="type">${types.map(([v, l]) => `<option value="${v}"${v === (c.type || '') ? ' selected' : ''}>${l}</option>`).join('')}</select></td>
-        <td><span class="cur-in">${c.currency === 'EUR' ? '€' : '£'}<input type="number" data-f="price" value="${c.price}" step="500"></span></td>
-        <td><select data-f="source">${opt(SOLD_SOURCES, c.source)}</select></td>
-        <td><select data-f="status">${opt(['sold', 'sale agreed'], c.status)}</select></td>
-      </tr>`).join('') +
-      '</tbody></table></div>' +
-      '<div class="row wrap"><button type="button" class="btn primary" id="soldAddSelected">Add selected</button><button type="button" class="btn ghost" id="soldCancel">Cancel</button></div>';
-  }
-
-  function soldPreviewEdit(e) {
-    const tr = e.target.closest('tr[data-k]');
-    const c = tr && soldPreview[Number(tr.dataset.k)];
-    const f = e.target.dataset.f;
-    if (!c || !f) return;
-    c[f] = e.target.type === 'checkbox' ? e.target.checked : e.target.type === 'number' ? (e.target.value === '' ? null : Number(e.target.value)) : e.target.value;
-  }
-
-  function addSoldSelected() {
-    const add = soldPreview.filter((c) => c.keep && Number(c.price) > 0)
-      .map(({ keep, ...c }) => ({ ...c, district: Comps.normaliseDistrict(c.district), id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7) }));
-    sales = sales.concat(add);
-    saveSales();
-    soldPreview = [];
-    $('soldPreview').hidden = true;
-    $('soldPasteBox').value = '';
-    refreshEstimates();
-  }
-
-  function renderSold() {
-    const beds = bedsNow();
-    const type = $('propertyType').value;
-    const typeName = TYPE_LABEL[type].toLowerCase();
-    const scope = soldScope(beds);
-    const s = Comps.summariseSales(sales, soldOpts(scope.districts, beds));
+  function renderLocalSales() {
     const here = subjectDistrict();
+    const views = [...SALE_AREAS, 'all'];
+    if (!saleView || !views.includes(saleView)) saleView = SALE_AREAS.includes(here) ? here : SALE_AREAS[0];
+    const nowGroup = Comps.rentGroup(bedsNow());
+    const afterGroup = Comps.rentGroup(bedsAfter());
+    if (!saleListGroup) saleListGroup = nowGroup;
+    $('saleAreaTabs').innerHTML = views.map((d) =>
+      `<button type="button" role="tab" data-sale-area="${d}" aria-selected="${d === saleView}">${d === 'all' ? SALE_AREAS.join(' + ') : d}${d === here ? ' •' : ''}</button>`).join('');
+
+    // How the purchase price compares with what you're buying.
     const price = Number($('price').value);
-    $('soldTitle').textContent = `Saved sales (${sales.length})`;
-    const ev = soldEvidence(beds);
-    const after = bedsAfter();
-    const evAfter = after !== beds ? soldEvidence(after) : null;
-    const vs = ev.stats && price ? ((price - ev.stats.median) / ev.stats.median) * 100 : NaN;
-    $('soldSummary').innerHTML = sales.length
-      ? [
-          `<span>${beds}-bed ${typeName} median <b>${s.bedsAndType.count ? money(s.bedsAndType.median) : '–'}</b> (${s.bedsAndType.count})</span>`,
-          `<span>${beds}-bed median <b>${s.sameBeds.count ? money(s.sameBeds.median) : '–'}</b> (${s.sameBeds.count})</span>`,
-          `<span>All sales <b>${s.all.count ? money(s.all.median) : '–'}</b> (${s.all.count}, ${escapeHtml(scope.label)}, last 2 years)</span>`,
-          evAfter && evAfter.stats ? `<span>After works (${after}-bed): <b>${money(evAfter.stats.median)}</b> median (${evAfter.stats.count} ${escapeHtml(evAfter.what)})</span>` : '',
-          Number.isFinite(vs) ? `<span>Your price is <b class="${vs <= 0 ? 'pos' : 'neg'}">${Math.abs(vs).toFixed(0)}% ${vs <= 0 ? 'below' : 'above'}</b> the ${escapeHtml(ev.what)} median</span>` : '',
-        ].join('')
-      : '<span class="muted">No sales saved yet. Use the search links, then paste what you find.</span>';
+    const ev = localSaleFor(bedsNow());
+    let compare = '';
+    if (ev && price) {
+      const vs = ((price - ev.median) / ev.median) * 100;
+      compare = ` Your price is <b class="${vs <= 0 ? 'pos' : 'neg'}">${Math.abs(vs).toFixed(0)}% ${vs <= 0 ? 'below' : 'above'}</b> the ${here} ${saleWhat(ev, bedsNow())} median of ${money(ev.median)} (${ev.count} sales${ev.count < MIN_COMPS ? ', very few' : ''}).`;
+    } else if (here && !SALE_AREAS.includes(here)) {
+      compare = ` No sale-agreed data for <b>${escapeHtml(here)}</b> yet.`;
+    }
+    $('salesSource').innerHTML = `${escapeHtml(SALES.meta.source || '')}, sale agreed ${salePeriod()}. Prices are the <b>asking price when the sale was agreed</b>, not the final sold price.` + compare;
 
-    const rows = Comps.summariseSalesByDistrict(sales, soldOpts(null, beds));
-    const nearby = new Set((area && area.nearbyDistricts) || []);
-    $('soldAreaWrap').hidden = !rows.length;
-    $('soldAreaTable').innerHTML = rows.length
-      ? `<caption>Sold prices by area, last 2 years</caption><thead><tr><th scope="col">Area</th><th scope="col">${beds}-bed ${typeName}</th><th scope="col">${beds}-bed median</th><th scope="col">${beds}-bed range</th><th scope="col">All sales median</th></tr></thead><tbody>` +
-        rows.map((r) => {
-          const mine = r.district && r.district === here;
-          const tag = mine ? ' <small class="tag local">buying here</small>' : nearby.has(r.district) ? ' <small class="tag">nearby</small>' : '';
-          const cell = (st) => (st.count ? `${money(st.median)} <small>(${st.count})</small>` : '–');
-          return `<tr class="${mine ? 'mine' : ''}">
-            <th scope="row">${r.district ? escapeHtml(r.district) : '<span class="muted">No area</span>'}${tag}</th>
-            <td>${cell(r.bedsAndType)}</td><td>${cell(r.sameBeds)}</td>
-            <td>${r.sameBeds.count > 1 ? `${money(r.sameBeds.min)}–${money(r.sameBeds.max)}` : '–'}</td>
-            <td>${cell(r.all)}</td></tr>`;
-        }).join('') + '</tbody>'
-      : '';
+    const sum = Comps.summariseSaleData(SALES.listings, saleView === 'all' ? null : saleView);
+    const mineArea = saleView === here;
+    $('salesTable').innerHTML =
+      `<caption>${saleView === 'all' ? SALE_AREAS.join(' + ') : saleView}: ${sum.count} sales</caption><thead><tr><th scope="col">Size</th><th scope="col">Sales</th><th scope="col">Average</th><th scope="col">Median</th><th scope="col">Lowest</th><th scope="col">Highest</th></tr></thead><tbody>` +
+      [...Comps.SALE_GROUPS, 'all'].map((g) => {
+        const st = sum.groups[g];
+        const tags = mineArea ? [g === nowGroup ? 'buying' : '', g === afterGroup && afterGroup !== nowGroup ? 'after works' : ''].filter(Boolean) : [];
+        const cell = (v) => (st.count ? money(v, 'GBP') : '–');
+        return `<tr class="${tags.length ? 'mine' : ''} ${g === 'all' ? 'sub' : ''}" data-sale-group="${g}" tabindex="0">
+          <th scope="row">${SALE_LABEL[g]}${tags.map((t) => ` <small class="tag local">${t}</small>`).join('')}</th>
+          <td>${st.count}</td><td>${cell(st.average)}</td><td>${cell(st.median)}</td><td>${cell(st.min)}</td><td>${cell(st.max)}</td></tr>`;
+      }).join('') + '</tbody>';
 
-    const sorted = sales.slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
-    $('soldTable').innerHTML = sorted.length
-      ? '<thead><tr><th scope="col">Date</th><th scope="col">Address</th><th scope="col">Area</th><th scope="col">Beds</th><th scope="col">Type</th><th scope="col">Price</th><th scope="col">Source</th><th scope="col"><span class="sr">Remove</span></th></tr></thead><tbody>' +
-        sorted.map((c) => {
-          const old = !Comps.withinMonths(c.date, SOLD_MONTHS);
-          const inScope = !scope.districts || scope.districts.includes(Comps.normaliseDistrict(c.district));
-          const match = inScope && Number(c.beds) === beds;
-          return `<tr class="${old || !inScope ? 'old' : ''} ${match ? 'mine' : ''}">
-            <td>${fmtDay(c.date)}${old ? ' <small>older</small>' : ''}</td>
-            <td>${escapeHtml(c.address || '–')}${c.status === 'sale agreed' ? ' <small class="tag">sale agreed</small>' : ''}</td>
-            <td>${escapeHtml(c.district || '–')}</td>
-            <td>${c.beds ?? '?'}</td>
-            <td>${TYPE_LABEL[c.type] || '–'}</td>
-            <td>${money(Number(c.price), c.currency || 'GBP')}</td>
-            <td>${escapeHtml(c.source || '')}</td>
-            <td><button type="button" class="link" data-remove-sale="${c.id}" aria-label="Remove">✕</button></td></tr>`;
-        }).join('') + '</tbody>'
-      : '';
+    const list = SALES.listings
+      .filter((l) => (saleView === 'all' || l.district === saleView) && (saleListGroup === 'all' || Comps.rentGroup(l.beds) === saleListGroup))
+      .sort((a, b) => b.date.localeCompare(a.date));
+    $('saleListingsTitle').textContent = `${SALE_LABEL[saleListGroup]} sales in ${saleView === 'all' ? SALE_AREAS.join(' + ') : saleView} (${list.length})`;
+    $('saleListings').innerHTML = list.length
+      ? '<thead><tr><th scope="col">Sale agreed</th><th scope="col">Address</th><th scope="col">Beds</th><th scope="col">Type</th><th scope="col">Asking price</th></tr></thead><tbody>' +
+        list.map((l) => `<tr><td>${fmtDay(l.date)}</td>
+          <td>${l.link ? `<a href="${escapeHtml(l.link)}" target="_blank" rel="noopener">${escapeHtml(l.address)}</a>` : escapeHtml(l.address)}</td>
+          <td>${l.beds}</td><td>${escapeHtml(String(l.type || '').replace(/Apartmentses$/, 'Apartments').replace(/s$/, ''))}</td>
+          <td>${money(l.price, 'GBP')} <small class="muted">${escapeHtml(l.basis || '')}</small></td></tr>`).join('') + '</tbody>'
+      : '<tbody><tr><td class="muted">No sales of this size.</td></tr></tbody>';
   }
 
   // ---------------------------------------------------------------------------
@@ -995,7 +896,7 @@
   // Persistence (this browser only)
   // ---------------------------------------------------------------------------
 
-  const persisted = () => fieldEls().filter((el) => !el.closest('#soldPreview'));
+  const persisted = () => fieldEls();
 
   function formState() {
     const state = {};
@@ -1162,8 +1063,6 @@
   // ---------------------------------------------------------------------------
 
   form.addEventListener('input', (e) => {
-    if (e.target.closest('#soldPreview')) return soldPreviewEdit(e);
-    if (e.target.id === 'soldPasteBox') return;
     const id = e.target.id;
     if (e.isTrusted && e.target.type !== 'radio') e.target.dataset.touched = '1';
     if (e.isTrusted) dealEdited();
@@ -1172,24 +1071,23 @@
     render();
   });
   form.addEventListener('change', (e) => {
-    if (e.target.closest('#soldPreview')) return soldPreviewEdit(e);
     const id = e.target.id;
-    if (e.isTrusted && id !== 'soldImportCsv') dealEdited();
-    if (id === 'soldImportCsv') { if (e.target.files[0]) importSoldCsv(e.target.files[0]); e.target.value = ''; return; }
+    if (e.isTrusted) dealEdited();
     if (id === 'refurbLevel') applyRefurbLevel();
     if (id === 'extraBedMethod') applyBedMethod();
     if (id === 'extraBedCost' || id === 'extraBedMonths') $('extraBedMethod').value = 'custom';
     if (id === 'country') syncCountry();
     if (id === 'strategy') syncStrategy();
     syncFinanceVisibility();
-    if (['propertyType', 'beds', 'excludeNewBuild', 'rtbArea', 'country', 'includeNearbySold', 'postcode', 'extraBeds'].includes(id)) {
+    if (['propertyType', 'beds', 'excludeNewBuild', 'rtbArea', 'country', 'postcode', 'extraBeds'].includes(id)) {
       rentListGroup = null;
+      saleListGroup = null;
       renderSearchLinks();
       refreshEstimates();
       renderArea();
       renderNews();
     } else if (id === 'price') {
-      renderSold();
+      renderLocalSales();
       if (area) renderArea();
     }
     render();
@@ -1210,14 +1108,6 @@
       refreshEstimates();
       return;
     }
-    const rmSale = e.target.closest('[data-remove-sale]');
-    if (rmSale) {
-      forget(sales.filter((c) => c.id === rmSale.dataset.removeSale));
-      sales = sales.filter((c) => c.id !== rmSale.dataset.removeSale);
-      saveSales();
-      refreshEstimates();
-      return;
-    }
     const pick = e.target.closest('[data-pick]');
     if (pick) {
       $('strategy').value = pick.dataset.pick;
@@ -1225,39 +1115,14 @@
       render();
       return;
     }
-    if (e.target.id === 'soldAddSelected') addSoldSelected();
-    if (e.target.id === 'soldCancel') { soldPreview = []; $('soldPreview').hidden = true; }
+    const stab = e.target.closest('[data-sale-area]');
+    if (stab) { saleView = stab.dataset.saleArea; renderLocalSales(); return; }
+    const sgrp = e.target.closest('[data-sale-group]');
+    if (sgrp) { saleListGroup = sgrp.dataset.saleGroup; renderLocalSales(); $('saleListingsWrap').open = true; return; }
     const tab = e.target.closest('[data-rent-area]');
     if (tab) { rentView = tab.dataset.rentArea; renderLocalRents(); return; }
     const grp = e.target.closest('[data-rent-group]');
     if (grp) { rentListGroup = grp.dataset.rentGroup; renderLocalRents(); $('rentListingsWrap').open = true; return; }
-  });
-
-  $('soldParseBtn').addEventListener('click', parseSoldPasted);
-  $('soldAddManualBtn').addEventListener('click', addSoldManual);
-  $('soldExportCsv').addEventListener('click', () => {
-    const blob = new Blob([Comps.toCsv(sales, Comps.SALE_COLS)], { type: 'text/csv' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `sold-prices-${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-  });
-  $('soldClear').addEventListener('click', (e) => {
-    const btn = e.currentTarget;
-    if (btn.dataset.confirm !== '1') {
-      btn.dataset.confirm = '1';
-      btn.textContent = 'Click again to delete all';
-      setTimeout(() => { btn.dataset.confirm = ''; btn.textContent = 'Clear all'; }, 4000);
-      return;
-    }
-    forget(sales);
-    sales = [];
-    saveSales();
-    btn.dataset.confirm = '';
-    btn.textContent = 'Clear all';
-    refreshEstimates();
   });
 
   $('newsTabs').addEventListener('click', (e) => {
@@ -1270,7 +1135,7 @@
   $('newsMore').addEventListener('click', () => { newsExpanded = !newsExpanded; renderNews(); });
 
   document.addEventListener('keydown', (e) => {
-    const pick = e.target.closest && e.target.closest('[data-pick], [data-rent-group]');
+    const pick = e.target.closest && e.target.closest('[data-pick], [data-rent-group], [data-sale-group]');
     if (pick && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); pick.click(); }
   });
 

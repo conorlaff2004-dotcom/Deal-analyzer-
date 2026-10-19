@@ -18,7 +18,7 @@
 <header class="top">
   <div class="brand">
     <h1>Property Deal Analyzer</h1>
-    <p>Purchase costs, refurb, full-let and lodger rent, yield, ROI and money left in after refinance. Works for Northern Ireland, Ireland and Great Britain, using let-agreed rents for BT7 and BT12, official rent figures and sold prices you collect.</p>
+    <p>Purchase costs, refurb, full-let and lodger rent, yield, ROI and money left in after refinance. Works for Northern Ireland, Ireland and Great Britain, using let-agreed rents and sale-agreed prices for BT7 and BT12, plus official figures elsewhere.</p>
   </div>
   <div class="top-actions">
     <button type="button" class="btn ghost sync-btn" id="syncBtn" aria-controls="syncPanel"><span class="dot" id="syncDot" data-tone="off"></span><span id="syncLabel">Not saved online</span></button>
@@ -311,6 +311,20 @@
       </details>
     </section>
 
+    <!-- Local sale prices -->
+    <section class="panel" aria-labelledby="h-sales" id="salesPanel">
+      <div class="comps-head">
+        <h2 id="h-sales">Local sale prices (sale agreed)</h2>
+        <div class="tabs" role="tablist" id="saleAreaTabs"></div>
+      </div>
+      <p class="note" id="salesSource"></p>
+      <div class="scroll"><table class="comps by-area rents" id="salesTable"></table></div>
+      <details id="saleListingsWrap">
+        <summary id="saleListingsTitle">Listings</summary>
+        <div class="scroll"><table class="comps saved" id="saleListings"></table></div>
+      </details>
+    </section>
+
     <!-- Property news -->
     <section class="panel" id="newsPanel">
       <div class="news" aria-labelledby="h-news">
@@ -328,34 +342,6 @@
           <span class="fine" id="newsMeta"></span>
         </div>
       </div>
-    </section>
-
-    <!-- Sold evidence -->
-    <section class="panel" aria-labelledby="h-sold" id="soldPanel">
-      <h2 id="h-sold">Sold evidence from listings</h2>
-      <p class="note">Search for sold and sale-agreed homes in the area, copy what you find and paste it here. Each sale is saved against its postcode district. Once the district you’re buying in has 3 or more sales from the last 2 years, they set the end value and show how your price compares.</p>
-      <div class="links" id="soldLinks"></div>
-      <label class="f">Paste sold listings
-        <textarea id="soldPasteBox" rows="5" placeholder="Copy a sold results page, a single sold listing or rows from the Property Price Register and paste them here. Prices, bedrooms, type, address and sale dates are picked out for you to check."></textarea>
-      </label>
-      <div class="row wrap">
-        <button type="button" class="btn primary" id="soldParseBtn">Read prices</button>
-        <button type="button" class="btn ghost" id="soldAddManualBtn">Add one by hand</button>
-      </div>
-      <div id="soldPreview" class="preview-wrap" hidden></div>
-
-      <div class="comps-head">
-        <h3 id="soldTitle">Saved sales</h3>
-        <div class="row wrap">
-          <button type="button" class="link" id="soldExportCsv">Export CSV</button>
-          <label class="link file">Import CSV<input id="soldImportCsv" type="file" accept=".csv,text/csv"></label>
-          <button type="button" class="link" id="soldClear">Clear all</button>
-        </div>
-      </div>
-      <div id="soldSummary" class="comps-summary"></div>
-      <label class="f check"><input id="includeNearbySold" type="checkbox"> Include nearby districts when this area has fewer than 3 sales</label>
-      <div class="scroll" id="soldAreaWrap" hidden><table class="comps by-area" id="soldAreaTable"></table></div>
-      <div class="scroll"><table class="comps saved" id="soldTable"></table></div>
     </section>
 
     <!-- Data settings -->
@@ -452,6 +438,7 @@
 <script src="js/data.js"></script>
 <script src="js/comps.js"></script>
 <script src="js/rent-data.js"></script>
+<script src="js/sale-data.js"></script>
 <script src="js/sync.js"></script>
 <script src="js/app.js"></script>
 </body>

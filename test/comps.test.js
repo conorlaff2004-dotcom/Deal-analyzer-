@@ -191,3 +191,24 @@ test('built-in let-agreed rents match the spreadsheet averages', () => {
   assert.equal(rentGroup(7), '6+');
   assert.equal(rentGroup(0), '1');
 });
+
+test('built-in sale-agreed prices match the spreadsheet averages', () => {
+  const { summariseSaleData, saleEvidence } = require('../js/comps.js');
+  const data = require('../js/sale-data.js');
+  assert.equal(data.listings.length, 230);
+  const bt7 = summariseSaleData(data.listings, 'BT7');
+  const bt12 = summariseSaleData(data.listings, 'BT12');
+  const both = summariseSaleData(data.listings, null);
+  assert.deepEqual([bt7.count, bt12.count, both.count], [113, 117, 230]);
+  const g = bt7.groups['3'];
+  assert.deepEqual([g.count, g.average.toFixed(2), g.median, g.min, g.max], [34, '225226.47', 212450, 129950, 399950]);
+  assert.deepEqual([bt12.groups['2'].count, bt12.groups['2'].median], [48, 124950]);
+  assert.equal(bt12.groups['4'].median, 149950);
+  assert.equal(bt7.groups['6+'].count, 4);
+  assert.equal(bt7.groups['1'].count, 0);
+  assert.equal(both.groups.all.median, 167225);
+  assert.equal(both.groups['3'].median, 159975);
+  const ev = saleEvidence(data.listings, 'BT12', 3, 'terraced');
+  assert.ok(ev.byType && ev.count >= 3);
+  assert.equal(saleEvidence(data.listings, 'BT9', 3, 'terraced'), null);
+});

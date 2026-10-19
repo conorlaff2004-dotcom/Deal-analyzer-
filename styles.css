@@ -329,3 +329,11 @@ textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 #rentListingsWrap[open] summary { margin-bottom: 8px; }
 #rentListings a { color: var(--ink); text-decoration-color: var(--line); }
 #rentListings a:hover { color: var(--lagoon); }
+#saleListingsWrap summary { cursor: pointer; font: 600 0.9rem var(--f-display); padding: 4px 0; }
+#saleListingsWrap[open] summary { margin-bottom: 8px; }
+#saleListings a { color: var(--ink); text-decoration-color: var(--line); }
+#saleListings a:hover { color: var(--lagoon); }
+.comps.rents tr[data-sale-group] { cursor: pointer; }
+.comps.rents tr[data-sale-group]:hover, .comps.rents tr[data-sale-group]:focus-visible { background: rgba(31, 143, 191, 0.12); outline: none; }
+.note b.pos { color: var(--good); }
+.note b.neg { color: var(--bad); }

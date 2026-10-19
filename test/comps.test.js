@@ -173,3 +173,21 @@ test('sold summaries by bedrooms, type and district', () => {
   assert.equal(back[4].price, 230000);
   assert.equal(back[4].district, 'BT7');
 });
+
+test('built-in let-agreed rents match the spreadsheet averages', () => {
+  const { summariseRentData, rentGroup } = require('../js/comps.js');
+  const data = require('../js/rent-data.js');
+  assert.equal(data.listings.length, 312);
+  const bt7 = summariseRentData(data.listings, 'BT7');
+  const bt12 = summariseRentData(data.listings, 'bt12');
+  assert.equal(bt7.count, 281);
+  assert.equal(bt12.count, 31);
+  assert.deepEqual([bt7.groups['3'].count, bt7.groups['3'].average, bt7.groups['3'].min, bt7.groups['3'].max], [66, 1312.5, 875, 1650]);
+  assert.equal(bt7.groups['2'].average.toFixed(2), '1069.69');
+  assert.equal(bt7.groups['6+'].count, 14);
+  assert.equal(bt7.groups.room.average.toFixed(2), '556.33');
+  assert.deepEqual([bt12.groups['3'].count, bt12.groups['3'].average], [4, 987.5]);
+  assert.equal(bt12.groups['5'].count, 0);
+  assert.equal(rentGroup(7), '6+');
+  assert.equal(rentGroup(0), '1');
+});

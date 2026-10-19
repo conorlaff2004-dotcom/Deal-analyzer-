@@ -18,7 +18,7 @@
 <header class="top">
   <div class="brand">
     <h1>Property Deal Analyzer</h1>
-    <p>Purchase costs, refurb, full-let and lodger rent, yield, ROI and money left in after refinance. Works for Northern Ireland, Ireland and Great Britain, using official rent figures and rents you collect from PropertyPal, PropertyNews, Daft, Rightmove and others.</p>
+    <p>Purchase costs, refurb, full-let and lodger rent, yield, ROI and money left in after refinance. Works for Northern Ireland, Ireland and Great Britain, using let-agreed rents for BT7 and BT12, official rent figures and sold prices you collect.</p>
   </div>
   <div class="top-actions">
     <button type="button" class="btn ghost sync-btn" id="syncBtn" aria-controls="syncPanel"><span class="dot" id="syncDot" data-tone="off"></span><span id="syncLabel">Not saved online</span></button>
@@ -297,36 +297,25 @@
       </div>
     </section>
 
-    <!-- Rent evidence -->
-    <section class="panel" aria-labelledby="h-comps" id="compsPanel">
-      <h2 id="h-comps">Rent evidence from listings</h2>
-      <p class="note">Search the listing sites for the area, copy what you find and paste it here. Each rent is saved against its postcode district (BT12, BT7, D06…). Once the district you’re buying in has 3 or more rents from the last 12 months, they set the full-let and room rent.</p>
-      <div class="links" id="searchLinks"></div>
-      <label class="f">Paste listings
-        <textarea id="pasteBox" rows="5" placeholder="Copy a search results page or a single listing (Ctrl+A, Ctrl+C) and paste it here. Rents, bedrooms, type, address and dates are picked out for you to check."></textarea>
-      </label>
-      <div class="row wrap">
-        <button type="button" class="btn primary" id="parseBtn">Read rents</button>
-        <button type="button" class="btn ghost" id="addManualBtn">Add one by hand</button>
-      </div>
-      <div id="parsePreview" hidden></div>
-
+    <!-- Local rents -->
+    <section class="panel" aria-labelledby="h-rents" id="rentsPanel">
       <div class="comps-head">
-        <h3 id="compsTitle">Saved rents</h3>
-        <div class="row wrap">
-          <button type="button" class="link" id="exportCsv">Export CSV</button>
-          <label class="link file">Import CSV<input id="importCsv" type="file" accept=".csv,text/csv"></label>
-          <button type="button" class="link" id="clearComps">Clear all</button>
-        </div>
+        <h2 id="h-rents">Local rents (let agreed)</h2>
+        <div class="tabs" role="tablist" id="rentAreaTabs"></div>
       </div>
-      <div id="compsSummary" class="comps-summary"></div>
-      <label class="f check"><input id="includeNearby" type="checkbox"> Include nearby districts when this area has fewer than 3 rents</label>
-      <div class="scroll" id="areaRentsWrap" hidden><table class="comps by-area" id="areaRents"></table></div>
-      <div class="scroll"><table class="comps saved" id="compsTable"></table></div>
+      <p class="note" id="rentsSource"></p>
+      <div class="scroll"><table class="comps by-area rents" id="rentsTable"></table></div>
+      <details id="rentListingsWrap">
+        <summary id="rentListingsTitle">Listings</summary>
+        <div class="scroll"><table class="comps saved" id="rentListings"></table></div>
+      </details>
+    </section>
 
+    <!-- Property news -->
+    <section class="panel" id="newsPanel">
       <div class="news" aria-labelledby="h-news">
         <div class="comps-head">
-          <h3 id="h-news">Property news</h3>
+          <h2 id="h-news">Property news</h2>
           <div class="tabs" role="tablist" id="newsTabs">
             <button type="button" role="tab" data-feed="ni">NI</button>
             <button type="button" role="tab" data-feed="ie">Ireland</button>
@@ -462,6 +451,7 @@
 <script src="js/calc.js"></script>
 <script src="js/data.js"></script>
 <script src="js/comps.js"></script>
+<script src="js/rent-data.js"></script>
 <script src="js/sync.js"></script>
 <script src="js/app.js"></script>
 </body>

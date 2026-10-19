@@ -379,32 +379,6 @@ LIMIT 1000`;
     return best;
   }
 
-  // ---------------------------------------------------------------------------
-  // Listing-site searches (opened in a new tab; the user copies results back)
-  // ---------------------------------------------------------------------------
-
-  function listingSearches({ area, beds, country }) {
-    const q = (site, words) => `https://www.google.com/search?q=${encodeURIComponent(`${words} site:${site}`)}`;
-    const bedWords = beds ? `${beds} bed` : '';
-    const ie = country === 'Ireland';
-    const list = ie
-      ? [
-          ['Daft.ie', q('daft.ie', `${bedWords} to rent ${area}`)],
-          ['PropertyPal', q('propertypal.com', `${bedWords} to rent ${area}`)],
-          ['MyHome.ie', q('myhome.ie', `${bedWords} to rent ${area}`)],
-          ['Rent.ie', q('rent.ie', `${bedWords} ${area}`)],
-          ['Rooms: Daft sharing', q('daft.ie/sharing', `room ${area}`)],
-        ]
-      : [
-          ['PropertyPal', q('propertypal.com', `${bedWords} property to rent ${area}`)],
-          ['PropertyNews', q('propertynews.com', `${bedWords} property to rent ${area}`)],
-          ['Rightmove', q('rightmove.co.uk', `${bedWords} to rent ${area}`)],
-          ['Zoopla', q('zoopla.co.uk', `${bedWords} to rent ${area}`)],
-          ['Rooms: SpareRoom', q('spareroom.co.uk', `room to rent ${area}`)],
-        ];
-    return list.map(([label, url]) => ({ label, url }));
-  }
-
   function soldSearches({ area, beds, country }) {
     const q = (site, words) => `https://www.google.com/search?q=${encodeURIComponent(`${words} site:${site}`)}`;
     const bedWords = beds ? `${beds} bed` : '';
@@ -430,7 +404,6 @@ LIMIT 1000`;
     loadRtb,
     parseJsonStat,
     matchRtbLocation,
-    listingSearches,
     normalisePostcode,
     lookupPostcode,
     nearbyPostcodes,

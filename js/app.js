@@ -35,7 +35,7 @@
   function readInputs() {
     const out = {};
     for (const el of fieldEls()) {
-      if (el.closest('#parsePreview') || el.closest('#soldPreview')) continue;
+      if (el.closest('#soldPreview')) continue;
       if (el.type === 'radio') {
         if (el.checked) out[el.name] = el.value;
       } else if (el.type === 'checkbox') {
@@ -187,11 +187,10 @@
     $('extraBedMonths').value = m.months;
   }
 
-  // Rent for a given bedroom count: your listings (2+), else the official figure.
+  // Rent for a given bedroom count: let-agreed average, else the official figure.
   function rentFor(beds) {
-    const scope = rentScope();
-    const s = Comps.summariseComps(comps, { beds, months: 12, currency: currency(), districts: scope.whole.districts });
-    if (s.sameBeds.count >= 2) return { value: s.sameBeds.median, from: 'your listings' };
+    const st = localRentFor(beds);
+    if (st) return { value: st.average, from: `${st.count} let-agreed in ${st.district}` };
     const off = officialRents(beds);
     return off && off.fullLet ? { value: off.fullLet, from: 'area estimate' } : null;
   }
@@ -337,7 +336,7 @@
     document.querySelectorAll('.cur').forEach((el) => { el.textContent = sym; });
     form.querySelectorAll('[data-country]').forEach((el) => { el.hidden = el.dataset.country !== c; });
     renderSearchLinks();
-    renderComps();
+    renderLocalRents();
     renderNews();
   }
 
@@ -525,32 +524,25 @@
   }
 
   // Pick the best rent figures and apply them to fields the user hasn't edited.
-  // Your own listings (3+ in the last 12 months) beat official figures.
+  // Built-in let-agreed rents for the area beat official figures.
   function refreshEstimates() {
     const beds = bedsAfter();
-    const scope = rentScope();
-    const s = Comps.summariseComps(comps, { beds, months: 12, currency: currency(), districts: scope.whole.districts });
-    const sr = Comps.summariseComps(comps, { beds, months: 12, currency: currency(), districts: scope.rooms.districts });
-    s.rooms = sr.rooms;
     const off = officialRents() || {};
-    const where = scope.whole.label === 'all areas' ? '' : ` in ${scope.whole.label}`;
-    const roomWhere = scope.rooms.label === 'all areas' ? '' : ` in ${scope.rooms.label}`;
+    const local = localRentFor(beds);
+    const d = subjectDistrict();
+    const noData = d && $('country').value !== 'Ireland' ? `. No let-agreed ${beds}-bed rents for ${d} in the built-in data` : '';
 
-    if (s.sameBeds.count >= MIN_COMPS) {
-      const m = Math.round(s.sameBeds.median / 5) * 5;
-      hint('rentHint', 'fullLetRent', m,
-        `Your listings: median of ${s.sameBeds.count} ${beds}-bed rents${where} in the last 12 months (${money(s.sameBeds.min)}–${money(s.sameBeds.max)})` +
-        (off.fullLet ? `. Official figure ${money(off.fullLet)}` : ''));
+    if (local) {
+      hint('rentHint', 'fullLetRent', Math.round(local.average / 5) * 5, rentText(local, `${beds}-bed lets`) + (off.fullLet ? `. Area estimate ${money(off.fullLet)}` : ''));
     } else if (off.fullLet) {
-      const need = MIN_COMPS - s.sameBeds.count;
-      hint('rentHint', 'fullLetRent', off.fullLet, `${off.fullLetText}. Add ${need} more ${beds}-bed listing${need > 1 ? 's' : ''}${where} to use local rents`);
+      hint('rentHint', 'fullLetRent', off.fullLet, off.fullLetText + noData);
     }
 
-    if (s.rooms.count >= MIN_COMPS) {
-      const m = Math.round(s.rooms.median / 5) * 5;
-      const text = `Your listings: median of ${s.rooms.count} room rents${roomWhere} in the last 12 months (${money(s.rooms.min)}–${money(s.rooms.max)})`;
-      hint('roomHint', 'lodgerRoomRent', m, text);
-      hint('hmoRoomHint', 'hmoRoomRent', m, text);
+    const room = localRentFor('room');
+    if (room) {
+      const text = rentText(room, 'rooms in shared houses');
+      hint('roomHint', 'lodgerRoomRent', Math.round(room.average / 5) * 5, text);
+      hint('hmoRoomHint', 'hmoRoomRent', Math.round(room.average / 5) * 5, text);
     } else if (off.room) {
       hint('roomHint', 'lodgerRoomRent', off.room, off.roomText);
       hint('hmoRoomHint', 'hmoRoomRent', off.room, off.roomText);
@@ -578,7 +570,7 @@
     }
 
     if (!$('lodgerRooms').dataset.touched && (area || Number($('extraBeds').value))) $('lodgerRooms').value = Math.max(0, beds - 1);
-    renderComps();
+    renderLocalRents();
     renderSold();
     render();
   }
@@ -628,18 +620,23 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Rent evidence from listings
+  // Local rents: built-in let-agreed listings (js/rent-data.js)
   // ---------------------------------------------------------------------------
 
-  let comps = loadComps();
-  let preview = [];
-  const SOURCES = ['PropertyPal', 'PropertyNews', 'Daft', 'Rightmove', 'Zoopla', 'MyHome', 'Rent.ie', 'SpareRoom', 'Agent', 'Other'];
+  const RENTS = window.RentData || { meta: {}, listings: [] };
+  const RENT_AREAS = Array.from(new Set(RENTS.listings.map((l) => l.district))).sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
+  const GROUP_LABEL = { 1: '1 bed', 2: '2 bed', 3: '3 bed', 4: '4 bed', 5: '5 bed', '6+': '6+ bed', room: 'Room in shared house' };
+  let rentView = null; // area tab chosen in the Local rents panel
+  let rentListGroup = null; // size whose listings are shown
 
+  // Rents saved by the old "rent evidence" panel are kept only so online
+  // saving doesn't drop them; nothing reads them any more.
+  let comps = loadComps();
   function loadComps() {
-    let list = [];
-    try { list = JSON.parse(localStorage.getItem(COMPS_KEY) || '[]'); } catch (e) { /* ignore */ }
-    // Rents saved before areas existed: take the district from the address.
-    return list.map((c) => ('district' in c ? c : { ...c, district: Comps.extractDistrict(c.address) }));
+    try { return JSON.parse(localStorage.getItem(COMPS_KEY) || '[]'); } catch (e) { return []; }
+  }
+  function saveComps() {
+    try { localStorage.setItem(COMPS_KEY, JSON.stringify(comps)); } catch (e) { /* storage unavailable */ }
   }
 
   // The district being analysed: BT12, M14, D06, or the Irish town.
@@ -650,25 +647,55 @@
     return '';
   }
 
-  // Which areas' rents count for this deal. Whole lets and rooms widen to
-  // nearby districts separately, and only when the box is ticked.
-  function rentScope() {
-    const d = subjectDistrict();
-    if (!d) return { whole: { districts: null, label: 'all areas' }, rooms: { districts: null, label: 'all areas' } };
-    const beds = bedsAfter();
-    const own = Comps.summariseComps(comps, { beds, months: 12, currency: currency(), districts: [d] });
-    const nearby = (area && area.nearbyDistricts) || [];
-    const widen = (short) => {
-      if (!$('includeNearby').checked || !nearby.length || !short) return { districts: [d], label: d };
-      const used = nearby.filter((n) => comps.some((c) => Comps.normaliseDistrict(c.district) === n));
-      return { districts: [d, ...nearby], label: used.length ? `${d} + nearby ${used.slice(0, 4).join(', ')}` : d };
-    };
-    return { whole: widen(own.sameBeds.count < MIN_COMPS), rooms: widen(own.rooms.count < MIN_COMPS) };
+  const localRents = (district) => Comps.summariseRentData(RENTS.listings, district);
+  const rentPeriod = () => {
+    const dates = RENTS.listings.map((l) => l.date).sort();
+    return dates.length ? `${fmtDate(dates[0])} – ${fmtDate(dates[dates.length - 1])}` : '';
+  };
+
+  // Let-agreed rent for this area and size, or null when there's no listing.
+  function localRentFor(beds, district = subjectDistrict()) {
+    if (!RENT_AREAS.includes(district)) return null;
+    const g = localRents(district).groups[Comps.rentGroup(beds)];
+    return g.count ? { ...g, district } : null;
   }
 
-  function saveComps() {
-    try { localStorage.setItem(COMPS_KEY, JSON.stringify(comps)); } catch (e) { /* storage unavailable */ }
-    scheduleSync();
+  function rentText(st, what) {
+    const thin = st.count < MIN_COMPS ? `. Only ${st.count} listing${st.count > 1 ? 's' : ''}, so treat it with care` : '';
+    return `Let-agreed rents in ${st.district}: average of ${st.count} ${what} ${money(st.average)} (${money(st.min)}–${money(st.max)})${thin}`;
+  }
+
+  function renderLocalRents() {
+    const here = subjectDistrict();
+    if (!rentView || !RENT_AREAS.includes(rentView)) rentView = RENT_AREAS.includes(here) ? here : RENT_AREAS[0];
+    const myGroup = Comps.rentGroup(bedsAfter());
+    if (!rentListGroup) rentListGroup = myGroup;
+    $('rentAreaTabs').innerHTML = RENT_AREAS.map((d) =>
+      `<button type="button" role="tab" data-rent-area="${d}" aria-selected="${d === rentView}">${d}${d === here ? ' •' : ''}</button>`).join('');
+    $('rentsSource').innerHTML = `${escapeHtml(RENTS.meta.source || '')}, let agreed ${rentPeriod()}. Pulled ${fmtDay(RENTS.meta.pulled)}. ` +
+      (RENT_AREAS.includes(here) ? `The deal uses <b>${here}</b>.` : here ? `No let-agreed data for <b>${escapeHtml(here)}</b> yet, so the deal uses the area estimate.` : '');
+
+    const sum = localRents(rentView);
+    $('rentsTable').innerHTML =
+      `<caption>${rentView}: ${sum.count} lets</caption><thead><tr><th scope="col">Size</th><th scope="col">Listings</th><th scope="col">Average rent</th><th scope="col">Lowest</th><th scope="col">Highest</th></tr></thead><tbody>` +
+      Comps.RENT_GROUPS.map((g) => {
+        const st = sum.groups[g];
+        const mine = rentView === here && g === myGroup;
+        return `<tr class="${mine ? 'mine' : ''}" data-rent-group="${g}" tabindex="0">
+          <th scope="row">${GROUP_LABEL[g]}${mine ? ' <small class="tag local">this deal</small>' : ''}</th>
+          <td>${st.count}</td><td>${st.count ? money(st.average) : '–'}</td><td>${st.count ? money(st.min) : '–'}</td><td>${st.count ? money(st.max) : '–'}</td></tr>`;
+      }).join('') + '</tbody>';
+
+    const list = RENTS.listings
+      .filter((l) => l.district === rentView && Comps.rentGroup(l.beds) === rentListGroup)
+      .sort((a, b) => b.date.localeCompare(a.date));
+    $('rentListingsTitle').textContent = `${GROUP_LABEL[rentListGroup]} listings in ${rentView} (${list.length})`;
+    $('rentListings').innerHTML = list.length
+      ? '<thead><tr><th scope="col">Let agreed</th><th scope="col">Address</th><th scope="col">Type</th><th scope="col">Rent / month</th></tr></thead><tbody>' +
+        list.map((l) => `<tr><td>${fmtDay(l.date)}</td>
+          <td>${l.link ? `<a href="${escapeHtml(l.link)}" target="_blank" rel="noopener">${escapeHtml(l.address)}</a>` : escapeHtml(l.address)}${l.note ? ` <small class="tag">${escapeHtml(l.note)}</small>` : ''}</td>
+          <td>${escapeHtml(l.type || '')}</td><td>${money(l.rent, 'GBP')}</td></tr>`).join('') + '</tbody>'
+      : '<tbody><tr><td class="muted">No listings of this size.</td></tr></tbody>';
   }
 
   function searchArea() {
@@ -684,156 +711,12 @@
     $('saLinks').innerHTML = '<span class="links-label">Check nightly rates:</span>' +
       [['Airbnb', g('airbnb.co.uk', `${a} entire home`)], ['Booking.com', g('booking.com', `${a} apartment`)], ['AirDNA', `https://www.airdna.co/vacation-rental-data/app/search?query=${encodeURIComponent(a)}`]]
         .map(([l, u]) => `<a href="${u}" target="_blank" rel="noopener">${l}</a>`).join('');
-    const links = Data.listingSearches({ area: searchArea(), beds: bedsAfter(), country: $('country').value });
-    $('searchLinks').innerHTML =
-      '<span class="links-label">Search:</span>' +
-      links.map((l) => `<a href="${l.url}" target="_blank" rel="noopener">${escapeHtml(l.label)}</a>`).join('');
-  }
-
-  function detectSource(text) {
-    const t = text.toLowerCase();
-    const map = [['propertypal', 'PropertyPal'], ['propertynews', 'PropertyNews'], ['daft', 'Daft'], ['rightmove', 'Rightmove'], ['zoopla', 'Zoopla'], ['myhome', 'MyHome'], ['rent.ie', 'Rent.ie'], ['spareroom', 'SpareRoom']];
-    const hit = map.find(([k]) => t.includes(k));
-    return hit ? hit[1] : $('country').value === 'Ireland' ? 'Daft' : 'PropertyPal';
-  }
-
-  function parsePasted() {
-    const text = $('pasteBox').value;
-    if (!text.trim()) return;
-    const source = detectSource(text);
-    const cur = currency();
-    preview = Comps.parseListings(text).map((c) => ({
-      ...c, source, currency: c.currency || cur, district: c.district || subjectDistrict(),
-      beds: c.beds === null && c.kind !== 'room' ? bedsAfter() || null : c.beds,
-      keep: c.currency === cur,
-    }));
-    renderPreview(preview.length ? '' : 'No rents found in that text. Copy the page again including the prices, or add one by hand.');
-  }
-
-  function addManual() {
-    preview.push({ rent: '', currency: currency(), district: subjectDistrict(), beds: bedsAfter() || null, kind: 'whole', type: $('propertyType').value, address: '', date: new Date().toISOString().slice(0, 10), status: 'listed', source: detectSource(''), keep: true });
-    renderPreview('');
-  }
-
-  function renderPreview(message) {
-    const el = $('parsePreview');
-    el.hidden = false;
-    if (!preview.length) { el.innerHTML = `<p class="status" data-tone="warn">${message}</p>`; return; }
-    const opt = (list, v) => list.map((o) => `<option${o === v ? ' selected' : ''}>${o}</option>`).join('');
-    el.innerHTML =
-      `<p class="note">Found ${preview.length}. Check them, untick any that aren’t comparable, then add.</p>` +
-      '<div class="scroll"><table class="comps preview"><thead><tr><th>Add</th><th>Date seen</th><th>Address</th><th>Area</th><th>Beds</th><th>Let as</th><th>Rent / month</th><th>Source</th><th>Status</th></tr></thead><tbody>' +
-      preview.map((c, k) => `<tr data-k="${k}">
-        <td><input type="checkbox" data-f="keep" ${c.keep ? 'checked' : ''} aria-label="Add this rent"></td>
-        <td><input type="date" data-f="date" value="${escapeHtml(c.date)}"></td>
-        <td><input type="text" data-f="address" value="${escapeHtml(c.address)}" placeholder="Street, area"></td>
-        <td><input type="text" data-f="district" value="${escapeHtml(c.district || '')}" placeholder="BT12" class="narrow" autocapitalize="characters"></td>
-        <td><input type="number" data-f="beds" value="${c.beds ?? ''}" min="0" max="12" class="narrow"></td>
-        <td><select data-f="kind">${['whole', 'room'].map((o) => `<option value="${o}"${o === c.kind ? ' selected' : ''}>${o === 'room' ? 'Room' : 'Whole property'}</option>`).join('')}</select></td>
-        <td><span class="cur-in">${c.currency === 'EUR' ? '€' : '£'}<input type="number" data-f="rent" value="${c.rent}" step="5"></span></td>
-        <td><select data-f="source">${opt(SOURCES, c.source)}</select></td>
-        <td><select data-f="status">${opt(['listed', 'let agreed'], c.status)}</select></td>
-      </tr>`).join('') +
-      '</tbody></table></div>' +
-      '<div class="row wrap"><button type="button" class="btn primary" id="addSelected">Add selected</button><button type="button" class="btn ghost" id="cancelPreview">Cancel</button></div>';
-  }
-
-  function previewEdit(e) {
-    const tr = e.target.closest('tr[data-k]');
-    if (!tr) return;
-    const c = preview[Number(tr.dataset.k)];
-    const f = e.target.dataset.f;
-    if (!c || !f) return;
-    c[f] = e.target.type === 'checkbox' ? e.target.checked : e.target.type === 'number' ? (e.target.value === '' ? null : Number(e.target.value)) : e.target.value;
-  }
-
-  function addSelected() {
-    const add = preview.filter((c) => c.keep && Number(c.rent) > 0).map(({ keep, ...c }) => ({ ...c, district: Comps.normaliseDistrict(c.district), id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7) }));
-    comps = comps.concat(add);
-    saveComps();
-    preview = [];
-    $('parsePreview').hidden = true;
-    $('pasteBox').value = '';
-    renderComps();
-    refreshEstimates();
-  }
-
-  function renderComps() {
-    const beds = bedsAfter();
-    const cur = currency();
-    const scope = rentScope();
-    const here = subjectDistrict();
-    const s = Comps.summariseComps(comps, { beds, months: 12, currency: cur, districts: scope.whole.districts });
-    const sr = Comps.summariseComps(comps, { beds, months: 12, currency: cur, districts: scope.rooms.districts });
-    $('compsTitle').textContent = `Saved rents (${comps.length})`;
-    $('compsSummary').innerHTML = comps.length
-      ? [
-          `<span>${beds}-bed median <b>${s.sameBeds.count ? money(s.sameBeds.median) : '–'}</b> (${s.sameBeds.count}, ${escapeHtml(scope.whole.label)})</span>`,
-          `<span>Rooms median <b>${sr.rooms.count ? money(sr.rooms.median) : '–'}</b> (${sr.rooms.count}, ${escapeHtml(scope.rooms.label)})</span>`,
-        ].join('')
-      : '<span class="muted">No rents saved yet. Use the search links, then paste what you find.</span>';
-
-    // Rents by area: shows how districts compare (e.g. BT12 vs BT7).
-    const rows = Comps.summariseByDistrict(comps, { beds, months: 12, currency: cur });
-    const nearby = new Set((area && area.nearbyDistricts) || []);
-    $('areaRentsWrap').hidden = rows.length < 1;
-    $('areaRents').innerHTML = rows.length
-      ? `<caption>Rents by area, last 12 months</caption><thead><tr><th scope="col">Area</th><th scope="col">${beds}-bed median</th><th scope="col">${beds}-bed range</th><th scope="col">All whole lets</th><th scope="col">Rooms</th></tr></thead><tbody>` +
-        rows.map((r) => {
-          const mine = r.district && r.district === here;
-          const tag = mine ? ' <small class="tag local">buying here</small>' : nearby.has(r.district) ? ' <small class="tag">nearby</small>' : '';
-          return `<tr class="${mine ? 'mine' : ''}">
-            <th scope="row">${r.district ? escapeHtml(r.district) : '<span class="muted">No area</span>'}${tag}</th>
-            <td>${r.sameBeds.count ? `${money(r.sameBeds.median)} <small>(${r.sameBeds.count})</small>` : '–'}</td>
-            <td>${r.sameBeds.count > 1 ? `${money(r.sameBeds.min)}–${money(r.sameBeds.max)}` : '–'}</td>
-            <td>${r.allWhole.count ? `${money(r.allWhole.median)} <small>(${r.allWhole.count})</small>` : '–'}</td>
-            <td>${r.rooms.count ? `${money(r.rooms.median)} <small>(${r.rooms.count})</small>` : '–'}</td></tr>`;
-        }).join('') + '</tbody>'
-      : '';
-
-    const sorted = comps.slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
-    $('compsTable').innerHTML = sorted.length
-      ? '<thead><tr><th scope="col">Date</th><th scope="col">Address</th><th scope="col">Area</th><th scope="col">Beds</th><th scope="col">Let as</th><th scope="col">Rent / month</th><th scope="col">Source</th><th scope="col"><span class="sr">Remove</span></th></tr></thead><tbody>' +
-        sorted.map((c) => {
-          const old = !Comps.withinMonths(c.date, 12);
-          const sc = c.kind === 'room' ? scope.rooms : scope.whole;
-          const inScope = !sc.districts || sc.districts.includes(Comps.normaliseDistrict(c.district));
-          const match = inScope && c.kind !== 'room' && Number(c.beds) === beds;
-          return `<tr class="${old || !inScope ? 'old' : ''} ${match ? 'mine' : ''}">
-            <td>${fmtDay(c.date)}${old ? ' <small>older</small>' : ''}</td>
-            <td>${escapeHtml(c.address || '–')}${c.status === 'let agreed' ? ' <small class="tag">let agreed</small>' : ''}</td>
-            <td>${escapeHtml(c.district || '–')}</td>
-            <td>${c.kind === 'room' ? '–' : c.beds ?? '?'}</td>
-            <td>${c.kind === 'room' ? 'Room' : TYPE_LABEL[c.type] || 'Whole'}</td>
-            <td>${money(Number(c.rent), c.currency || 'GBP')}</td>
-            <td>${escapeHtml(c.source || '')}</td>
-            <td><button type="button" class="link" data-remove="${c.id}" aria-label="Remove">✕</button></td></tr>`;
-        }).join('') + '</tbody>'
-      : '';
-  }
-
-  function exportCsv() {
-    const blob = new Blob([Comps.toCsv(comps)], { type: 'text/csv' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `rent-comparables-${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
   }
 
   async function importSoldCsv(file) {
     const rows = Comps.fromCsv(await file.text(), Comps.SALE_COLS);
     sales = sales.concat(rows.map((c) => ({ ...c, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7) })));
     saveSales();
-    refreshEstimates();
-  }
-
-  async function importCsv(file) {
-    const rows = Comps.fromCsv(await file.text());
-    comps = comps.concat(rows.map((c) => ({ ...c, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7) })));
-    saveComps();
-    renderComps();
     refreshEstimates();
   }
 
@@ -1112,7 +995,7 @@
   // Persistence (this browser only)
   // ---------------------------------------------------------------------------
 
-  const persisted = () => fieldEls().filter((el) => !el.closest('#parsePreview') && !el.closest('#soldPreview'));
+  const persisted = () => fieldEls().filter((el) => !el.closest('#soldPreview'));
 
   function formState() {
     const state = {};
@@ -1279,9 +1162,8 @@
   // ---------------------------------------------------------------------------
 
   form.addEventListener('input', (e) => {
-    if (e.target.closest('#parsePreview')) return previewEdit(e);
     if (e.target.closest('#soldPreview')) return soldPreviewEdit(e);
-    if (e.target.id === 'pasteBox' || e.target.id === 'soldPasteBox') return;
+    if (e.target.id === 'soldPasteBox') return;
     const id = e.target.id;
     if (e.isTrusted && e.target.type !== 'radio') e.target.dataset.touched = '1';
     if (e.isTrusted) dealEdited();
@@ -1290,20 +1172,18 @@
     render();
   });
   form.addEventListener('change', (e) => {
-    if (e.target.closest('#parsePreview')) return previewEdit(e);
     if (e.target.closest('#soldPreview')) return soldPreviewEdit(e);
     const id = e.target.id;
-    if (e.isTrusted && id !== 'importCsv' && id !== 'soldImportCsv') dealEdited();
+    if (e.isTrusted && id !== 'soldImportCsv') dealEdited();
     if (id === 'soldImportCsv') { if (e.target.files[0]) importSoldCsv(e.target.files[0]); e.target.value = ''; return; }
-    if (id === 'importCsv') { if (e.target.files[0]) importCsv(e.target.files[0]); e.target.value = ''; return; }
     if (id === 'refurbLevel') applyRefurbLevel();
     if (id === 'extraBedMethod') applyBedMethod();
     if (id === 'extraBedCost' || id === 'extraBedMonths') $('extraBedMethod').value = 'custom';
     if (id === 'country') syncCountry();
     if (id === 'strategy') syncStrategy();
     syncFinanceVisibility();
-    if (['propertyType', 'beds', 'excludeNewBuild', 'rtbArea', 'country', 'includeNearby', 'includeNearbySold', 'postcode', 'extraBeds'].includes(id)) {
-      renderComps();
+    if (['propertyType', 'beds', 'excludeNewBuild', 'rtbArea', 'country', 'includeNearbySold', 'postcode', 'extraBeds'].includes(id)) {
+      rentListGroup = null;
       renderSearchLinks();
       refreshEstimates();
       renderArea();
@@ -1317,25 +1197,6 @@
   form.addEventListener('submit', (e) => { e.preventDefault(); analyseArea(); });
   $('postcode').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); analyseArea(); } });
   $('analyseBtn').addEventListener('click', analyseArea);
-  $('parseBtn').addEventListener('click', parsePasted);
-  $('addManualBtn').addEventListener('click', addManual);
-  $('exportCsv').addEventListener('click', exportCsv);
-  $('clearComps').addEventListener('click', (e) => {
-    const btn = e.currentTarget;
-    if (btn.dataset.confirm !== '1') {
-      btn.dataset.confirm = '1';
-      btn.textContent = 'Click again to delete all';
-      setTimeout(() => { btn.dataset.confirm = ''; btn.textContent = 'Clear all'; }, 4000);
-      return;
-    }
-    forget(comps);
-    comps = [];
-    saveComps();
-    btn.dataset.confirm = '';
-    btn.textContent = 'Clear all';
-    renderComps();
-    refreshEstimates();
-  });
   $('pdKey').addEventListener('change', async () => {
     if (area && area.pc && area.country !== 'Northern Ireland') { await fetchLiveRents($('pdKey').value.trim()); refreshEstimates(); }
   });
@@ -1346,15 +1207,6 @@
       const field = $(apply.dataset.apply);
       field.value = apply.dataset.value;
       delete field.dataset.touched;
-      refreshEstimates();
-      return;
-    }
-    const rm = e.target.closest('[data-remove]');
-    if (rm) {
-      forget(comps.filter((c) => c.id === rm.dataset.remove));
-      comps = comps.filter((c) => c.id !== rm.dataset.remove);
-      saveComps();
-      renderComps();
       refreshEstimates();
       return;
     }
@@ -1375,8 +1227,10 @@
     }
     if (e.target.id === 'soldAddSelected') addSoldSelected();
     if (e.target.id === 'soldCancel') { soldPreview = []; $('soldPreview').hidden = true; }
-    if (e.target.id === 'addSelected') addSelected();
-    if (e.target.id === 'cancelPreview') { preview = []; $('parsePreview').hidden = true; }
+    const tab = e.target.closest('[data-rent-area]');
+    if (tab) { rentView = tab.dataset.rentArea; renderLocalRents(); return; }
+    const grp = e.target.closest('[data-rent-group]');
+    if (grp) { rentListGroup = grp.dataset.rentGroup; renderLocalRents(); $('rentListingsWrap').open = true; return; }
   });
 
   $('soldParseBtn').addEventListener('click', parseSoldPasted);
@@ -1416,7 +1270,7 @@
   $('newsMore').addEventListener('click', () => { newsExpanded = !newsExpanded; renderNews(); });
 
   document.addEventListener('keydown', (e) => {
-    const pick = e.target.closest && e.target.closest('[data-pick]');
+    const pick = e.target.closest && e.target.closest('[data-pick], [data-rent-group]');
     if (pick && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); pick.click(); }
   });
 

@@ -371,7 +371,33 @@
     }).filter((o) => (cols === SALE_COLS ? o.price : o.rent) > 0);
   }
 
-  const api = { parseListings, parseSales, summariseSales, summariseSalesByDistrict, SALE_COLS, summariseComps, summariseByDistrict, extractDistrict, districtOf, normaliseDistrict, median, toCsv, fromCsv, withinMonths };
+  // ---------------------------------------------------------------------------
+  // Built-in let-agreed rents (js/rent-data.js): averages by area and size,
+  // grouped the same way as the source spreadsheet.
+  // ---------------------------------------------------------------------------
+
+  const RENT_GROUPS = ['1', '2', '3', '4', '5', '6+', 'room'];
+
+  function rentGroup(beds) {
+    if (beds === 'room') return 'room';
+    const b = Math.max(1, Math.round(Number(beds) || 0)); // studios sit with 1-beds
+    return b >= 6 ? '6+' : String(b);
+  }
+
+  function summariseRentData(listings, district) {
+    const d = normaliseDistrict(district);
+    const mine = listings.filter((l) => normaliseDistrict(l.district) === d);
+    const groups = {};
+    for (const g of RENT_GROUPS) {
+      const v = mine.filter((l) => rentGroup(l.beds) === g).map((l) => Number(l.rent));
+      groups[g] = v.length
+        ? { count: v.length, average: v.reduce((a, b) => a + b, 0) / v.length, min: Math.min(...v), max: Math.max(...v), median: median(v) }
+        : { count: 0 };
+    }
+    return { district: d, count: mine.length, groups };
+  }
+
+  const api = { rentGroup, summariseRentData, RENT_GROUPS, parseListings, parseSales, summariseSales, summariseSalesByDistrict, SALE_COLS, summariseComps, summariseByDistrict, extractDistrict, districtOf, normaliseDistrict, median, toCsv, fromCsv, withinMonths };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.DealComps = api;
 })(typeof window !== 'undefined' ? window : globalThis);

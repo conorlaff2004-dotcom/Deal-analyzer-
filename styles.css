@@ -320,3 +320,12 @@ textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .sync-panel #syncSetup[hidden], .sync-panel #syncConnected[hidden] { display: none; }
 .sync-panel input { flex: 1; min-width: 0; max-width: 420px; }
 #syncMsg:empty { display: none; }
+
+/* Local rents */
+#newsPanel .news { border-top: 0; padding-top: 0; }
+.comps.rents tr[data-rent-group] { cursor: pointer; }
+.comps.rents tr[data-rent-group]:hover, .comps.rents tr[data-rent-group]:focus-visible { background: rgba(31, 143, 191, 0.12); outline: none; }
+#rentListingsWrap summary { cursor: pointer; font: 600 0.9rem var(--f-display); padding: 4px 0; }
+#rentListingsWrap[open] summary { margin-bottom: 8px; }
+#rentListings a { color: var(--ink); text-decoration-color: var(--line); }
+#rentListings a:hover { color: var(--lagoon); }

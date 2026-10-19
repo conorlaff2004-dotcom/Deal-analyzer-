@@ -17,16 +17,13 @@ A calculator for screening buy-to-let and BRRR deals in Northern Ireland, Irelan
 
 ## Rents
 
-Rent figures come from three places, best first:
+Rents come from **built-in let-agreed listings** for BT7 and BT12 (`js/rent-data.js`, made from `data/BT7_BT12_let_agreed_rents.xlsx`: 312 PropertyPal let-agreed listings, Jan–Oct 2026). The *Local rents* panel shows each area's average, lowest and highest rent by size (1–5 bed, 6+ bed, room in a shared house). Click a size to see its listings, with links.
 
-1. **Your listings.** The *Rent evidence* panel has search links for PropertyPal, PropertyNews, Daft, Rightmove, Zoopla, MyHome, Rent.ie and SpareRoom, filtered to the area and bedrooms. Copy a results page or a single listing and paste it in. The app picks out each rent (pcm or per week), bedrooms, property type, address, date and "let agreed", and you tick the ones to keep. Each rent is saved against its **postcode district** (BT12, BT7, M14) or, in Ireland, Eircode routing key (D06, W91), read from the address and editable before you add it. When you analyse a property, only rents from **its own district** count: once that district has **3 or more rents for the same bedroom count from the last 12 months**, the median becomes the full-let rent. A *Rents by area* table compares districts side by side. Tick *Include nearby districts* to borrow rents from neighbouring districts when yours has too few; whole lets and rooms widen separately. Room listings set the lodger room rent the same way. Saved rents sync between your devices once you connect online saving (see below); Export / Import CSV also works as a backup.
-2. **Official figures**, applied automatically by **Analyse area**:
-   - **Ireland**: the RTB Rent Index (rents agreed on new tenancies, CSO table RIA02) for the town or area, by bedrooms and property type, for the latest year. Enter an Eircode or town; the matching RTB area is filled in and you can change it.
-   - **Northern Ireland**: NI Housing Executive average rent (Jan–Jun 2025), Belfast £1,130 or rest of NI £850, adjusted for bedrooms and type.
-   - **Great Britain**: PropertyData live asking rents if you add an API key, otherwise regional averages scaled to local sold prices.
-3. **Rough guides** for room rents in NI and Ireland until you add room listings.
+For the property you're analysing, the deal uses the average for its district and its bedroom count after any added bedrooms. Room rents for lodgers and HMOs use the "room in shared house" average. The hint under each field shows how many listings the figure is based on and warns when there are fewer than 3.
 
-The app doesn't fetch listing sites itself. PropertyPal, Daft and Rightmove don't offer public APIs, their terms don't allow automated scraping, and they block it. The search link plus paste step takes a minute per area and keeps you within their terms.
+Outside BT7 and BT12, or for a size with no listings, the app falls back to official figures: the NI Housing Executive average (Belfast £1,130, rest of NI £850, Jan–Jun 2025), the RTB Rent Index for Ireland, or PropertyData / regional estimates in Great Britain.
+
+To update the rents, replace the spreadsheet and regenerate `js/rent-data.js` from it (one row per listing: address, rooms, rent, area, let-agreed date, type, link, note).
 
 ## Property news
 
@@ -52,7 +49,7 @@ Northern Ireland doesn't publish individual sale prices. Ireland's Property Pric
 
 ## Saving online across devices
 
-Press **Not saved online** at the top of the app to connect a device. Your saved rents, sold prices and current deal figures are stored in a private GitHub gist in your own account, using an access key with only the `gist` permission. On each device you paste the key once. After that, every change uploads a couple of seconds after you make it, and the app downloads the latest data each time you open it or switch back to it. Data from different devices is merged, so nothing added on one device is lost, and deleting a rent or sale removes it everywhere. Your PropertyData API key and the GitHub key stay on each device.
+Press **Not saved online** at the top of the app to connect a device. Your saved sold prices and current deal figures are stored in a private GitHub gist in your own account, using an access key with only the `gist` permission. On each device you paste the key once. After that, every change uploads a couple of seconds after you make it, and the app downloads the latest data each time you open it or switch back to it. Data from different devices is merged, so nothing added on one device is lost, and deleting a sale removes it everywhere. Your PropertyData API key and the GitHub key stay on each device.
 
 ## Using it online
 
@@ -78,7 +75,8 @@ npm test         # unit tests for the tax, deal maths and listing parser
 - `index.html`, `styles.css`: the calculator
 - `js/calc.js`: the deal maths (pure functions, tested)
 - `js/data.js`: postcode, sold price, RTB and NI rent lookups and estimates
-- `js/comps.js`: reads rents from pasted listings and summarises them (tested)
+- `js/comps.js`: reads pasted sold listings, summarises sales and the built-in rents (tested)
+- `js/rent-data.js`: built-in let-agreed rents for BT7 and BT12
 - `js/app.js`: wires the form to the maths and renders results
 - `server.js`: static server and API proxy
 
